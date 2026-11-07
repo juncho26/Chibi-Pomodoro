@@ -1,0 +1,12 @@
+   firmware/build/
+   firmware/sdkconfig
+   firmware/sdkconfig.old
+   firmware/dependencies.lock
+   firmware/managed_components/
+   simulator/obj/
+   simulator/lvgl/
+   .vscode/
+   .idea/
+   .DS_Store
+   Thumbs.db
+   __pycache__/
