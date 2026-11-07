@@ -1,0 +1,13 @@
+menu "Chibi"
+choice CHIBI_BOARD
+    prompt "Board revision"
+    default CHIBI_BOARD_V2
+    help
+        Waveshare changed the board's power and touch wiring in June 2026 (V2 / Rev1.1).
+        Look at the back of your board: "Rev1.1" or "V2" means V2.
+    config CHIBI_BOARD_V2
+        bool "V2 / Rev1.1 (shipped from 8 June 2026)"
+    config CHIBI_BOARD_V1
+        bool "V1 (original)"
+endchoice
+endmenu

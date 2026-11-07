@@ -1,0 +1,8 @@
+## Libraries the firmware uses. ESP-IDF downloads them automatically on the first build
+## (into firmware/managed_components/) from https://components.espressif.com
+dependencies:
+  idf: ">=5.5"
+  lvgl/lvgl: "~9.2.2"                        # graphics
+  espressif/esp_lcd_axs15231b: "~1.0.1"      # the screen's controller (AXS15231B)
+  espressif/esp_lcd_touch: "~1.2.1"          # touch interface used by the screen driver
+  espressif/mdns: "~1.14.1"                  # announces the device as chibi.local

@@ -1,0 +1,488 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Chibi</title>
+<style>
+/* Layout: one phone screen. The list fills the screen, the add bar is pinned to the bottom like a chat app. System fonts only: the device serves this page with no internet. */
+:root{
+  --page:#F6F7F8; --surface:#FFFFFF; --line:#D9DDE2; --fg:#16191D; --muted:#5E6670;
+  --amber:#B86E00; --on-amber:#FFFFFF; --mint:#13804A; --danger:#B3261E; --rain:#2F6FD6; --rain-bg:#E8F0FD;
+  --ui:system-ui,-apple-system,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--page:#0B0C0E;--surface:#16181B;--line:#2A2E33;--fg:#ECEAE6;--muted:#9AA1A9;--amber:#FFB547;--on-amber:#1A1204;--mint:#7EE0A0;--danger:#FF8A80;--rain:#7FB2FF;--rain-bg:#14213A;color-scheme:dark}}
+:root[data-theme="dark"]{--page:#0B0C0E;--surface:#16181B;--line:#2A2E33;--fg:#ECEAE6;--muted:#9AA1A9;--amber:#FFB547;--on-amber:#1A1204;--mint:#7EE0A0;--danger:#FF8A80;--rain:#7FB2FF;--rain-bg:#14213A;color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{background:var(--page);color:var(--fg);font:16px/1.45 var(--ui);margin:0}
+.app{height:100%;max-width:520px;margin:0 auto;display:flex;flex-direction:column}
+.top{display:flex;align-items:center;gap:10px;padding-block:14px 4px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.eyes{display:flex;gap:4px;padding:7px 6px;background:#000;border-radius:8px;flex:none}
+.eyes i{width:6px;height:9px;border-radius:3px;background:#fff;animation:blink 5s infinite}
+@keyframes blink{0%,94%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+h1{font-size:19px;margin:0;flex:1}
+.status{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap}
+.status .dot{width:7px;height:7px;border-radius:50%;background:var(--mint)}
+.status.off .dot{background:var(--danger)}
+.status.busy .dot{background:var(--amber)}
+.scroll{flex:1;overflow-y:auto;padding-block:10px 16px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:14px}
+.preview{font-size:12.5px;color:var(--muted);border:1px dashed var(--line);border-radius:10px;padding:7px 10px;margin:0}
+ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+li{position:relative;border-radius:12px;touch-action:pan-y;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;transition:transform .18s ease}
+li.lifted{z-index:3;transition:none}
+li.lifted .front{box-shadow:0 10px 28px rgba(0,0,0,.28);border-color:var(--amber);transform:scale(1.02)}
+.front{display:flex;align-items:center;min-height:52px;background:var(--surface);border:1px solid var(--line);border-radius:12px;position:relative;z-index:1;transition:transform .18s ease}
+li.done .front{background:var(--page)}
+li.dragging .front{transition:none}
+.swipe-bg{position:absolute;inset:0;border-radius:12px;background:var(--danger);display:flex;align-items:center;justify-content:flex-end;padding-right:18px;color:#fff;font-weight:600;font-size:14px;opacity:0}
+.ck{flex:none;width:48px;height:48px;display:grid;place-items:center;border:none;background:none;padding:0}
+.ck span{width:22px;height:22px;border-radius:6px;border:2px solid var(--muted);display:grid;place-items:center}
+li.done .ck span{background:var(--mint);border-color:var(--mint)}
+.ck svg{opacity:0}li.done .ck svg{opacity:1}
+button{font:inherit;color:inherit;cursor:pointer}
+.name{flex:1;min-width:0;padding:11px 12px 11px 0;border:none;background:none;text-align:left;overflow-wrap:anywhere}
+li.done .name{color:var(--muted);text-decoration:line-through}
+.name input{width:100%;font:inherit;color:var(--fg);background:var(--page);border:1.5px solid var(--amber);border-radius:8px;padding:6px 8px}
+.lbl{font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0;display:flex;justify-content:space-between}
+.lbl span{text-transform:none;letter-spacing:0;font:400 12.5px var(--ui)}
+.donewrap{display:flex;flex-direction:column;gap:8px}
+.donewrap:empty{display:none}
+.empty{color:var(--muted);font-size:14px;padding:16px;text-align:center;border:1px dashed var(--line);border-radius:12px;margin:0}
+.tip{font-size:12.5px;color:var(--muted);text-align:center;margin:0}
+/* device text size: its own page, opened from the Aa chip. The preview uses the device's own
+   numbers (172 px wide, row = line height + 17, gap 6, box 12 + 2·level), so it is the real size. */
+.wx.aa{gap:1px;padding:0 11px;font-weight:600;color:var(--muted)}
+.aa b{font-size:11px}.aa b+b{font-size:16px}
+.tsp{position:fixed;inset:0;z-index:7;background:var(--page);display:flex;flex-direction:column;max-width:520px;margin:0 auto;transform:translateX(100%);visibility:hidden;transition:transform .24s ease,visibility 0s .24s;will-change:transform}
+.tsp.show{transform:none;visibility:visible;transition:transform .24s ease}
+.tsp .hd{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:calc(10px + env(safe-area-inset-top,0px)) 8px 4px}
+.tsp .hd button{justify-self:start;border:none;background:none;color:var(--amber);font-size:16px;min-height:44px;padding:0 8px}
+.tsp h2{font-size:17px;margin:0}
+.tsp .mid{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:8px 16px;overflow:hidden}
+.tsp .cap{font-size:12.5px;color:var(--muted);margin:0;text-align:center}
+.dev{flex:none;width:184px;background:#000;border:6px solid #26292D;border-radius:18px;padding:0 0 10px;overflow:hidden;contain:strict;height:354px;position:relative;
+  --lh:17px;--fs:13px;--rh:34px;--rs:40px;--cs:12px}
+.dev .cnt{font:700 28px/1 var(--ui);color:#FFB547;text-align:center;height:32px;padding-top:6px;font-variant-numeric:tabular-nums}
+.dev ol{list-style:none;margin:0;padding:0;position:absolute;left:10px;top:44px;right:10px;height:288px;overflow:hidden;-webkit-mask-image:linear-gradient(#000 82%,transparent);mask-image:linear-gradient(#000 82%,transparent)}
+.dev li{position:absolute;left:0;width:152px;height:var(--rh);top:calc(var(--i)*var(--rs));background:#141414;border:1px solid #2E2E2E;border-radius:8px;touch-action:auto;transition:none;
+  display:flex;align-items:center;gap:8px;padding-left:8px;color:#ECEAE6;font:var(--fs)/var(--lh) "Noto Sans JP","Hiragino Sans",var(--ui);white-space:nowrap}
+.dev li i{flex:none;width:var(--cs);height:var(--cs);border:2px solid #8C8C8C;border-radius:3px;margin-top:-2px}
+.dev li span{overflow:hidden;padding-right:4px}
+.dev.est li span{text-overflow:ellipsis}
+.dev li.d{background:#0E0E0E;border-color:#222;color:#6E6E6E;text-decoration:line-through}
+.dev li.d i{background:#7EE0A0;border-color:#7EE0A0;position:relative}
+.dev li.d i::after{content:"";position:absolute;left:28%;top:8%;width:28%;height:52%;border:solid #06210F;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.tsp .ctl{background:var(--surface);border-top:1px solid var(--line);padding:14px max(20px,env(safe-area-inset-left,0px)) max(18px,env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:2px}
+.tsp .ctl .h{display:flex;justify-content:space-between;align-items:baseline}
+.tsp .ctl label{font-size:14px;font-weight:600}
+.tsp .ctl output{font-size:15px;font-weight:700;color:var(--amber)}
+.tsp .ctl input{width:100%;accent-color:var(--amber);height:40px;margin:0}
+.tsp .ctl .ends{display:flex;justify-content:space-between;color:var(--muted);font-weight:600;line-height:1}
+.bar{border-top:1px solid var(--line);background:var(--surface);padding-top:10px;padding-bottom:max(10px,env(safe-area-inset-bottom,0px));padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px))}
+.add{display:flex;gap:8px}
+.add input{flex:1;min-width:0;font:inherit;color:var(--fg);background:var(--page);border:1.5px solid var(--line);border-radius:12px;padding:11px 12px}
+.add input:focus{outline:none;border-color:var(--amber)}
+.btn{border:none;border-radius:12px;padding:0 18px;min-height:46px;font-weight:600;background:var(--amber);color:var(--on-amber)}
+.btn:disabled{opacity:.4;cursor:default}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translate(-50%,40px);opacity:0;visibility:hidden;background:var(--fg);color:var(--page);border-radius:12px;padding:9px 10px 9px 16px;display:flex;align-items:center;gap:12px;font-size:14px;transition:transform .2s,opacity .2s,visibility .2s;max-width:calc(100% - 32px);z-index:8}
+.toast.show{transform:translate(-50%,0);opacity:1;visibility:visible}
+.toast button{border:none;background:none;color:var(--amber);font-weight:700;min-height:34px}
+/* weather chip + sheet */
+.wx{display:flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:0 10px 0 8px;min-height:32px;font-size:12.5px;color:var(--muted);white-space:nowrap}
+.wx svg{flex:none}
+.wx.rain{background:var(--rain-bg);border-color:transparent;color:var(--rain);font-weight:600}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.4);opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s;z-index:6}
+.scrim.show{opacity:1;visibility:visible}
+.sheet{position:fixed;left:0;right:0;bottom:0;max-width:520px;margin:0 auto;background:var(--surface);border-radius:18px 18px 0 0;padding:8px max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-bottom,0px));transform:translateY(105%);transition:transform .25s ease;z-index:7;display:flex;flex-direction:column;gap:14px;max-height:92%;overflow-y:auto}
+.sheet.show{transform:none}
+.grab{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto}
+.sheet h2{font-size:18px;margin:0;display:flex;justify-content:space-between;align-items:center}
+.sheet h2 button{border:none;background:none;color:var(--muted);font-size:14px;min-height:40px;padding:0 4px}
+.today{display:flex;align-items:center;gap:10px;border-radius:12px;padding:10px 12px;background:var(--page);font-size:14px}
+.today svg{flex:none}
+.tsp.show~.toast,.sheet.show~.toast{bottom:auto;top:calc(12px + env(safe-area-inset-top,0px))}
+.today.rain{background:var(--rain-bg);color:var(--rain);font-weight:600}
+.field{display:flex;flex-direction:column;gap:6px;margin:0;border:none;padding:0}
+.field label,.field legend{font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:0}
+.field input{font:inherit;color:var(--fg);background:var(--page);border:1.5px solid var(--line);border-radius:12px;padding:11px 12px;width:100%}
+.field input:focus{outline:none;border-color:var(--amber)}
+.hint{font-size:12.5px;color:var(--muted);margin:0}
+.hint.ok{color:var(--mint)}
+.hint.bad{color:var(--danger)}
+.row2{display:flex;flex-direction:column;gap:8px}
+.sheet .btn{width:100%}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--page);border-radius:12px;padding:4px}
+.seg button{border:none;background:none;border-radius:9px;min-height:40px;font-size:14px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.nets{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.nets li{border:1px solid var(--line);border-radius:12px;padding:0 4px 0 12px;background:var(--surface);touch-action:auto;display:flex;flex-direction:column}
+.nets .r1{display:flex;align-items:center;gap:8px;min-height:46px}
+.nets .nm{flex:1;min-width:0;overflow-wrap:anywhere;font-size:15px}
+.nets .wt{font-size:12px;font-weight:600;white-space:nowrap;color:var(--muted)}
+.nets .wt.ok{color:var(--mint)}.nets .wt.bad{color:var(--danger)}.nets .wt.busy{color:var(--amber)}.nets .wt.far{font-weight:400}
+.nets .rm{border:none;background:none;min-width:64px;min-height:44px;color:var(--muted);font-size:13px}
+.nets .fx{align-self:flex-start;border:none;background:none;color:var(--amber);font-size:13.5px;font-weight:600;min-height:36px;padding:0;margin-top:-6px}
+.nets form{display:flex;gap:8px;padding:0 8px 10px 0}
+.nets form input{flex:1;min-width:0;padding:10px 12px}
+.nets form .btn{width:auto;min-height:44px;padding:0 14px}
+.btn2{border:1.5px solid var(--amber);border-radius:12px;min-height:44px;padding:0 16px;background:none;color:var(--amber);font-weight:600}
+.btn2:disabled{border-color:var(--line);color:var(--muted);cursor:default}
+.addbox{display:flex;flex-direction:column;gap:10px;border:1px solid var(--line);border-radius:14px;padding:12px}
+.addbox .hd{display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:600}
+.addbox .hd button{border:none;background:none;color:var(--muted);font-size:13px;min-height:36px;padding:0 2px}
+.scan{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.scan li{touch-action:auto;border-radius:12px}
+.scan button{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:0 12px;border:1.5px solid var(--line);background:var(--page);border-radius:12px;font-size:15px;text-align:left}
+.scan button span:first-child{flex:1;min-width:0;overflow-wrap:anywhere}
+.scan button small{font-size:12px;color:var(--muted);white-space:nowrap}
+.scan button[aria-pressed="true"]{border-color:var(--amber);background:color-mix(in srgb,var(--amber) 12%,var(--page))}
+.scan button:disabled{color:var(--muted);cursor:default}
+.scan .msg{font-size:13.5px;color:var(--muted);padding:12px;text-align:center;border:1px dashed var(--line);border-radius:12px}
+.scanft{display:flex;justify-content:space-between;align-items:center}
+.lk{border:none;background:none;color:var(--amber);font-size:13.5px;font-weight:600;min-height:40px;padding:0}
+.lk:disabled{color:var(--muted)}
+.linkbtn{border:none;background:none;color:var(--muted);font-size:13px;text-decoration:underline;min-height:40px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="app">
+  <div class="top">
+    <div class="eyes" aria-hidden="true"><i></i><i></i></div>
+    <h1>Tasks</h1>
+    <span class="status" id="status" role="status"><span class="dot"></span><span id="statusT">Connecting…</span></span>
+    <button class="wx aa" id="tsChip" type="button" aria-label="Text size on the device" aria-haspopup="dialog"><b>A</b><b>A</b></button>
+    <button class="wx" id="wxChip" type="button" aria-haspopup="dialog"><span id="wxIcon"></span><span id="wxChipT">Weather</span></button>
+  </div>
+  <div class="scroll" id="scroll">
+    <p class="preview" id="preview" hidden>Preview with example tasks. On the device, this page edits your real list.</p>
+    <ul id="todo"></ul>
+    <div class="donewrap" id="done"></div>
+    <p class="tip" id="tip">Hold and drag to reorder · swipe left to delete · tap to rename</p>
+  </div>
+  <div class="bar">
+    <form class="add" id="addForm" autocomplete="off">
+      <input id="newTask" maxlength="40" placeholder="Add a task" aria-label="New task" enterkeyhint="send">
+      <button class="btn" id="addBtn" type="submit" disabled>Add</button>
+    </form>
+  </div>
+</div>
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="wxTitle" inert>
+  <div class="grab" aria-hidden="true"></div>
+  <h2><span id="wxTitle">Weather</span><button type="button" id="wxClose">Close</button></h2>
+  <div class="today" id="wxToday"></div>
+  <div class="field">
+    <label>Wi-Fi networks <span id="wxNetCount"></span></label>
+    <ul class="nets" id="wxNets"></ul>
+    <button class="btn2" id="wxAddOpen" type="button">+ Add a network</button>
+    <div class="addbox" id="wxAdd" hidden>
+      <div class="hd"><span>Add a network</span><button type="button" id="wxAddCancel">Cancel</button></div>
+      <div class="seg" role="group" aria-label="How to add"><button type="button" id="wxTabN" aria-pressed="true">Nearby</button><button type="button" id="wxTabT" aria-pressed="false">Type the name</button></div>
+      <div id="wxNear">
+        <ul class="scan" id="wxScan" aria-label="Nearby networks"></ul>
+        <div class="scanft"><button class="lk" id="wxMore" type="button" hidden></button><button class="lk" id="wxRescan" type="button">Scan again</button></div>
+        <p class="hint">Hotspot not here? Turn it on and scan again, or type its name.</p>
+      </div>
+      <div id="wxTyped" hidden>
+        <input id="wxSsid" maxlength="32" placeholder="Network name" aria-label="Wi-Fi network name" autocapitalize="off" autocomplete="off" spellcheck="false">
+        <p class="hint" style="margin-top:6px">It’s saved even if it isn’t on right now. The device joins it when it’s nearby.</p>
+      </div>
+      <form class="row2" id="wxNetForm" autocomplete="off">
+        <input id="wxPass" type="password" maxlength="64" placeholder="Password" aria-label="Wi-Fi password">
+        <button class="btn2" type="submit" id="wxNetAdd">Add network</button>
+      </form>
+    </div>
+    <p class="hint" id="wxNetHint">Save up to 3, like your home Wi-Fi and your phone’s hotspot. About once an hour the device joins one for a few seconds to check the forecast.</p>
+  </div>
+  <form class="row2" id="wxForm" autocomplete="off">
+    <div class="field">
+      <label id="wxPlaceLbl">Place</label>
+      <div class="seg" role="group" aria-labelledby="wxPlaceLbl"><button type="button" id="wxModeAuto" aria-pressed="true">Near me</button><button type="button" id="wxModeCity" aria-pressed="false">Choose a place</button></div>
+      <input id="wxCity" maxlength="60" placeholder="City or area, e.g. Tokyo" aria-label="Place" enterkeyhint="done" hidden>
+      <p class="hint" id="wxPlace"></p>
+    </div>
+    <button class="btn" id="wxSave" type="submit">Save</button>
+  </form>
+  <button class="linkbtn" id="wxOff" type="button" hidden>Turn weather off</button>
+</div>
+<div class="tsp" id="tsp" role="dialog" aria-modal="true" aria-labelledby="tsTitle" inert>
+  <div class="hd"><button type="button" id="tsBack">‹ Tasks</button><h2 id="tsTitle">Text size</h2></div>
+  <div class="mid">
+    <p class="cap">Preview of the device, about real size</p>
+    <div class="dev" id="dev" aria-hidden="true"><div class="cnt" id="devCnt">0/0</div><ol id="devList"></ol></div>
+    <p class="cap">Turn the device to Tasks to watch it change as you slide.</p>
+  </div>
+  <div class="ctl">
+    <div class="h"><label for="ts">Task text size</label><output id="tsName" for="ts">Small</output></div>
+    <input type="range" id="ts" min="0" max="3" step="1" value="0" aria-valuetext="Small">
+    <div class="ends" aria-hidden="true"><span style="font-size:12px">A</span><span style="font-size:20px">A</span></div>
+  </div>
+</div>
+<div class="toast" id="toast"><span id="toastT"></span><button id="toastUndo" type="button" hidden>Undo</button></div>
+
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const TOKEN=new URLSearchParams(location.search).get('t')||'';
+let state={},tasks=[],mock=false,editing=null,lastPoll=0,busy=0,clockSynced=false;
+
+/* ---------- talking to the device (or an in-page preview when there's no device) ---------- */
+const MS=[{s:'HUAWEI-B315-9C1F',r:-48},{s:'aterm-5b19e3-g',r:-63},{s:'0000docomo',r:-77,o:true},{s:'elecom-8e2a41',r:-80},{s:'TP-Link_5G_77B0',r:-84}];
+const M={taskFont:0,wx:{on:false,auto:false,city:'',place:'',status:'Not set up'},wifis:[],wifiNow:'',tasks:[{id:1,n:'Lab report draft',d:false},{id:2,n:'Math worksheet',d:false},{id:3,n:'線形代数 課題',d:false},{id:4,n:'Email professor',d:false},{id:5,n:'Read chapter 3',d:true},{id:6,n:'Print slides',d:true}],next:7,epoch:0};
+function mockApi(method,path,body){
+  const t=M.tasks,id=+(path.split('/')[3]||0),i=t.findIndex(x=>x.id===id);
+  if(path==='/api/tasks'&&method==='POST'){const p=t.findIndex(x=>x.d);const n={id:M.next++,n:body.n,d:false};p<0?t.push(n):t.splice(p,0,n)}
+  else if(path.startsWith('/api/tasks/')&&method==='PATCH'&&i>=0){
+    if('n' in body)t[i].n=body.n;
+    if('d' in body&&t[i].d!==body.d){const [x]=t.splice(i,1);x.d=body.d;const p=t.findIndex(y=>y.d);p<0?t.push(x):t.splice(p,0,x)}}
+  else if(path.startsWith('/api/tasks/')&&method==='DELETE'&&i>=0)t.splice(i,1);
+  else if(path==='/api/time')M.epoch=body.epoch;
+  else if(path==='/api/wifi'){if(body.remove)M.wifis=M.wifis.filter(x=>x.ssid!==body.ssid);else{let w=M.wifis.find(x=>x.ssid===body.ssid);
+      if(!w){if(M.wifis.length>=3)throw new Error('Up to 3 networks. Remove one first.');M.wifis.push(w={ssid:body.ssid})}
+      w.st='testing';setTimeout(()=>{w.st=!MS.some(x=>x.s===w.ssid)?'notnear':(body.pass||'').length<8?'wrongpass':'ok'},2500)}}
+  else if(path.startsWith('/api/scan'))return{nets:MS};
+  else if(path==='/api/weather'){const fc={status:'Updated just now',rain:true,fromHour:15,now:false,chance:40,snow:false};
+    M.wx=body.off?{on:false,auto:false,city:'',place:'',status:'Not set up'}:body.auto?{on:true,auto:true,city:'',place:'Shinjuku, Tokyo',...fc}:{on:true,auto:false,city:body.city,place:body.city.replace(/^./,c=>c.toUpperCase())+', Japan',...fc};
+    if(!M.wifis.length){M.wx.status='Needs a Wi-Fi network';M.wx.place='';delete M.wx.rain}}
+  else if(path==='/api/settings'){if('taskFont' in body)M.taskFont=body.taskFont}
+  else if(path==='/api/order'){const by=new Map(t.map(x=>[x.id,x]));const o=body.ids.map(i=>by.get(i)).filter(Boolean);M.tasks=o.filter(x=>!x.d).concat(o.filter(x=>x.d))}
+  return JSON.parse(JSON.stringify({taskFont:M.taskFont,tasks:M.tasks,epoch:M.epoch||Math.floor(Date.now()/1000)-200,wifis:M.wifis,wifiNow:M.wifiNow,weather:M.wx}));
+}
+async function api(method,path,body){
+  if(mock)return mockApi(method,path,body);
+  const r=await fetch(path,{method,headers:{'Content-Type':'application/json','X-Token':TOKEN},body:body?JSON.stringify(body):undefined,cache:'no-store'});
+  if(r.status===403)throw new Error('This link has expired. Scan the QR code on the device again.');
+  if(!r.ok){let m='';try{m=await r.text()}catch(e){}throw new Error(m&&m.length<80?m:'The device didn’t accept that change.')}
+  return r.json();
+}
+// Every change is sent at once; the device writes it to flash. The status shows when it has landed.
+async function send(method,path,body,okMsg){
+  busy++;setStatus();
+  try{const s=await api(method,path,body);tasks=s.tasks;state=s;renderWx();renderTs();busy--;setStatus(true);render();if(okMsg)toast(okMsg);return true}
+  catch(e){busy--;setStatus(false);toast(e.message&&e.message.length<80?e.message:'Not saved: lost connection to the device. Move closer and try again.');refresh();return false}
+}
+function setStatus(ok){
+  const s=$('status');s.classList.toggle('busy',busy>0);if(ok!==undefined)s.classList.toggle('off',!ok);
+  $('statusT').textContent=busy>0?'Saving…':s.classList.contains('off')?'Offline':mock?'Preview':'Saved on device';
+}
+/* The clock syncs itself: if the device is more than 20 s off (or not set), send the phone's time. */
+async function syncClock(epoch){
+  if(clockSynced)return;
+  const drift=Math.abs((epoch||0)-Date.now()/1000);
+  if(!epoch||drift>20){
+    try{await api('POST','/api/time',{epoch:Math.floor(Date.now()/1000),tzOffsetMin:-new Date().getTimezoneOffset()});toast('Device clock set from your phone')}catch(e){return}
+  }
+  clockSynced=true;
+}
+
+/* ---------- list ---------- */
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+const CHECK='<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7.2l2.6 2.6L11 4.4" fill="none" stroke="#06210F" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function row(t){
+  const nm=editing===t.id?`<span class="name"><input id="ed" maxlength="40" value="${esc(t.n)}" aria-label="Rename task"></span>`:`<button class="name" type="button" data-edit="${t.id}">${esc(t.n)}</button>`;
+  return `<li data-id="${t.id}" class="${t.d?'done':''}"><div class="swipe-bg" aria-hidden="true">Delete</div><div class="front"><button class="ck" type="button" data-ck="${t.id}" aria-label="${t.d?'Mark not done':'Mark done'}: ${esc(t.n)}"><span>${CHECK}</span></button>${nm}</div></li>`;
+}
+function render(){
+  if(document.querySelector('li.dragging'))return;
+  const todo=tasks.filter(t=>!t.d),done=tasks.filter(t=>t.d);
+  $('todo').innerHTML=todo.length?todo.map(row).join(''):'<p class="empty">Nothing to do. Add a task below.</p>';
+  $('done').innerHTML=done.length?`<p class="lbl">Done <span>${done.length} · flip the device to clear</span></p><ul>${done.map(row).join('')}</ul>`:'';
+  $('tip').hidden=!tasks.length;
+  const full=tasks.length>=20;$('newTask').disabled=full;$('newTask').placeholder=full?'List is full (20 tasks)':'Add a task';
+  const e=$('ed');if(e&&document.activeElement!==e){e.focus();e.setSelectionRange(e.value.length,e.value.length)}
+}
+
+/* ---------- actions ---------- */
+$('newTask').addEventListener('input',e=>$('addBtn').disabled=!e.target.value.trim());
+$('addForm').addEventListener('submit',async e=>{e.preventDefault();const n=$('newTask').value.trim();if(!n)return;
+  $('newTask').value='';$('addBtn').disabled=true;
+  if(!await send('POST','/api/tasks',{n},'Added')){$('newTask').value=n;$('addBtn').disabled=false}
+  else $('scroll').scrollTop=0});
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.ck){const t=tasks.find(x=>x.id==b.dataset.ck);if(!t)return;send('PATCH','/api/tasks/'+t.id,{d:!t.d})}
+  else if(b.dataset.edit){editing=+b.dataset.edit;render()}});
+document.addEventListener('keydown',e=>{if(e.target.id!=='ed')return;if(e.key==='Enter'){e.preventDefault();e.target.blur()}if(e.key==='Escape'){editing=null;render()}});
+document.addEventListener('focusout',e=>{if(e.target.id!=='ed')return;const id=editing,v=e.target.value.trim();editing=null;const t=tasks.find(x=>x.id===id);
+  if(t&&v&&v!==t.n){t.n=v;render();send('PATCH','/api/tasks/'+id,{n:v},'Renamed')}else render()});
+function del(id){const t=tasks.find(x=>x.id===id);if(!t)return;
+  send('DELETE','/api/tasks/'+id).then(ok=>{if(ok)toast('Deleted',async()=>{if(await send('POST','/api/tasks',{n:t.n})&&t.d){const n=tasks.find(x=>x.n===t.n&&!x.d);if(n)send('PATCH','/api/tasks/'+n.id,{d:true})}})})}
+
+/* gestures: swipe left to delete · press and hold, then drag to reorder (to-do tasks) */
+let gesture='none';
+document.addEventListener('touchmove',e=>{if(gesture==='reorder')e.preventDefault()},{passive:false});
+document.addEventListener('contextmenu',e=>{if(e.target.closest('li[data-id]'))e.preventDefault()});
+document.addEventListener('pointerdown',e=>{const li=e.target.closest('li[data-id]');if(!li||e.target.closest('input')||gesture!=='none')return;
+  const front=li.querySelector('.front'),bg=li.querySelector('.swipe-bg');const x0=e.clientX,y0=e.clientY;let dx=0,dy=0;
+  gesture='pending';
+  let rows=[],start=0,idx=0,h=0;
+  const timer=setTimeout(()=>{if(gesture!=='pending'||li.classList.contains('done'))return;
+    gesture='reorder';rows=[...$('todo').querySelectorAll('li[data-id]')];start=idx=rows.indexOf(li);h=li.offsetHeight+6;
+    li.classList.add('lifted','dragging');navigator.vibrate&&navigator.vibrate(12)},380);
+  const move=ev=>{dx=ev.clientX-x0;dy=ev.clientY-y0;
+    if(gesture==='pending'){
+      if(dx<-10&&Math.abs(dy)<18){gesture='swipe';clearTimeout(timer);li.classList.add('dragging')}
+      else if(Math.abs(dy)>10||dx>10){gesture='scroll';clearTimeout(timer)}
+    }
+    if(gesture==='swipe'){const d=Math.min(0,dx);front.style.transform=`translateX(${d}px)`;bg.style.opacity=Math.min(1,-d/90)}
+    if(gesture==='reorder'){
+      const lo=-start*h,hi=(rows.length-1-start)*h,y=Math.max(lo-12,Math.min(hi+12,dy));
+      li.style.transform=`translateY(${y}px)`;idx=Math.max(0,Math.min(rows.length-1,start+Math.round(y/h)));
+      rows.forEach((r,i)=>{if(r===li)return;let sft=0;if(start<idx&&i>start&&i<=idx)sft=-h;if(start>idx&&i<start&&i>=idx)sft=h;r.style.transform=sft?`translateY(${sft}px)`:''})}};
+  const up=()=>{clearTimeout(timer);removeEventListener('pointermove',move);removeEventListener('pointerup',up);removeEventListener('pointercancel',up);
+    const g=gesture;gesture='none';li.classList.remove('dragging','lifted');
+    if(g==='swipe'){if(dx<-90){front.style.transform='translateX(-110%)';setTimeout(()=>del(+li.dataset.id),150)}else{front.style.transform='';bg.style.opacity=0}}
+    if(g==='reorder'){rows.forEach(r=>r.style.transform='');
+      if(idx!==start){const todo=tasks.filter(t=>!t.d),[m]=todo.splice(start,1);todo.splice(idx,0,m);tasks=todo.concat(tasks.filter(t=>t.d));render();
+        send('POST','/api/order',{ids:tasks.map(t=>t.id)},'Order saved')}}
+    if(g==='swipe'||g==='reorder'){const stop=ev=>{ev.stopPropagation();ev.preventDefault()};document.addEventListener('click',stop,{capture:true,once:true});setTimeout(()=>document.removeEventListener('click',stop,{capture:true}),60)}};
+  addEventListener('pointermove',move);addEventListener('pointerup',up);addEventListener('pointercancel',up)});
+
+/* ---------- weather ---------- */
+const ICON_UMB='<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8a6.5 6.5 0 0 1 13 0c-1-1-2.2-1-3.25 0-1-1-2.25-1-3.25 0-1-1-2.25-1-3.25 0-1-1-2.25-1-3.25 0z" fill="currentColor" fill-opacity=".18" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 8v5a1.5 1.5 0 0 1-3 0" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+const ICON_SNOW='<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M8 1.5v13M2.4 4.75l11.2 6.5M2.4 11.25l11.2-6.5M6.3 2.6 8 4l1.7-1.4M6.3 13.4 8 12l1.7 1.4"/></svg>';
+const ICON_SUN='<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>';
+function wxSummary(w){
+  if(!w||!w.on)return{chip:'Weather',icon:ICON_UMB,wet:false,line:'Turn on weather and the character puts up an umbrella on days with any chance of rain or snow.'};
+  if(w.rain===undefined)return{chip:'Weather',icon:ICON_UMB,wet:false,line:w.status||'Waiting for the first forecast'};
+  if(!w.rain)return{chip:'No rain',icon:ICON_SUN,wet:false,line:'No rain or snow expected for the rest of today'};
+  const what=w.snow?'Snow':'Rain',when=w.now?'today':'from '+String(w.fromHour).padStart(2,'0')+':00';
+  return{chip:w.now?what:`${what} ${String(w.fromHour).padStart(2,'0')}:00`,icon:w.snow?ICON_SNOW:ICON_UMB,wet:true,line:`${what} ${when} · up to ${w.chance}% chance`};
+}
+let wxMode='auto';
+function setMode(m){wxMode=m;$('wxModeAuto').setAttribute('aria-pressed',m==='auto');$('wxModeCity').setAttribute('aria-pressed',m==='city');$('wxCity').hidden=m!=='city';renderPlace()}
+function renderPlace(){
+  const w=state.weather||{},p=$('wxPlace'),same=w.on&&((wxMode==='auto')===!!w.auto);
+  if(same&&w.place&&w.place!=='?'){p.className='hint ok';p.textContent=(w.auto?'Around ':'Found: ')+w.place+(w.status?' · '+w.status:'')}
+  else if(same&&w.status&&w.status!=='Not set up'){p.className='hint'+(/not found|couldn/i.test(w.status)?' bad':'');p.textContent=w.status}
+  else if(wxMode==='auto'){p.className='hint';p.textContent='Estimated from the Wi-Fi’s internet connection: usually right to the city at home, rougher on a phone hotspot. The board has no GPS.'}
+  else{p.className='hint';p.textContent='A city, ward or station name in romaji works best. Coordinates like 35.69, 139.98 too.'}
+}
+/* ---------- Wi-Fi: saved list with what the device last learned, and adding by scan or by name ---------- */
+const NS={testing:['busy','Checking…'],ok:['ok','Connects ✓'],wrongpass:['bad','Wrong password'],notnear:['far','Saved · not nearby now'],failed:['bad','Couldn’t connect']};
+let netSig='',fixing='',addOpen=false,addTab='n',scan=null,scanBusy=false,scanAll=false,pick='';
+// Rebuilt only when something changed, so a poll never wipes a password being typed.
+function renderNets(){
+  const n=state.wifis||[],full=n.length>=3;
+  const sig=JSON.stringify([n,state.wifiNow,fixing]);
+  if(sig!==netSig){netSig=sig;const keep=$('wxFixPass')&&$('wxFixPass').value;
+    $('wxNets').innerHTML=n.map(x=>{const st=x.ssid===state.wifiNow?['ok','Connected']:NS[x.st];const fix=x.st==='wrongpass'||x.st==='failed';
+      return `<li><div class="r1"><span class="nm">${esc(x.ssid)}</span>${st?`<span class="wt ${st[0]}" role="status">${st[1]}</span>`:''}<button class="rm" type="button" data-rm="${esc(x.ssid)}" aria-label="Forget ${esc(x.ssid)}">Remove</button></div>`+
+        (fix&&fixing!==x.ssid?`<button class="fx" type="button" data-fix="${esc(x.ssid)}">Fix password</button>`:'')+
+        (fixing===x.ssid?`<form data-fixf="${esc(x.ssid)}"><input id="wxFixPass" type="password" maxlength="64" placeholder="New password" aria-label="New password for ${esc(x.ssid)}"><button class="btn" type="submit">Retry</button></form>`:'')+'</li>'}).join('');
+    if(fixing&&$('wxFixPass')){$('wxFixPass').value=keep||'';}}
+  $('wxNetCount').textContent=n.length?`${n.length}/3`:'';
+  if(full&&addOpen)showAdd(false);
+  $('wxAddOpen').hidden=addOpen;$('wxAddOpen').disabled=full;$('wxAddOpen').textContent=full?'3 saved: remove one to add another':'+ Add a network';
+  if(addOpen&&addTab==='n')renderScan();
+}
+function showAdd(on){addOpen=on;$('wxAdd').hidden=!on;$('wxAddOpen').hidden=on;
+  if(on){pick='';$('wxSsid').value='';$('wxPass').value='';setTab('n')}}
+function setTab(t){addTab=t;$('wxTabN').setAttribute('aria-pressed',t==='n');$('wxTabT').setAttribute('aria-pressed',t==='t');
+  $('wxNear').hidden=t!=='n';$('wxTyped').hidden=t!=='t';
+  if(t==='n'){if(!scan)scanLoad(false);renderScan()}else{passFor(null);setTimeout(()=>$('wxSsid').focus({preventScroll:true}),50)}}
+// The device scans only when asked, and reuses a scan from the last 15 s.
+async function scanLoad(fresh,tries=0){if(scanBusy)return;scanBusy=true;$('wxRescan').disabled=true;if(!scan)renderScan();
+  try{const r=await api('GET','/api/scan'+(fresh?'?fresh=1':''));scan=r.nets||[]}
+  catch(e){if(tries<3){scanBusy=false;setTimeout(()=>scanLoad(fresh,tries+1),1500);return}if(!scan)scan=[]}
+  scanBusy=false;$('wxRescan').disabled=false;renderScan()}
+const bars=r=>r>=-60?'Strong':r>=-72?'Fair':'Weak';
+function renderScan(){const ul=$('wxScan');
+  if(!scan){ul.innerHTML='<li class="msg">Looking for networks…</li>';$('wxMore').hidden=true;return}
+  if(!scan.length){ul.innerHTML='<li class="msg">No networks found. Move closer and scan again.</li>';$('wxMore').hidden=true;return}
+  const saved=new Set((state.wifis||[]).map(x=>x.ssid)),list=scanAll?scan:scan.slice(0,4);
+  ul.innerHTML=list.map(x=>saved.has(x.s)?`<li><button type="button" disabled><span>${esc(x.s)}</span><small>Saved</small></button></li>`
+    :`<li><button type="button" data-pick="${esc(x.s)}" aria-pressed="${x.s===pick}"><span>${esc(x.s)}</span><small>${x.o?'Open · ':''}${bars(x.r)}</small></button></li>`).join('');
+  const more=scan.length-4;$('wxMore').hidden=more<=0;$('wxMore').textContent=scanAll?'Show fewer':`Show ${more} more`}
+function passFor(net){const p=$('wxPass'),open=net&&net.o;p.disabled=!!open;p.placeholder=open?'No password needed':'Password';if(open)p.value=''}
+$('wxAddOpen').onclick=()=>{showAdd(true);if(addTab==='n')$('wxTabN').focus({preventScroll:true})};
+$('wxAddCancel').onclick=()=>{showAdd(false);$('wxAddOpen').focus({preventScroll:true})};
+$('wxTabN').onclick=()=>setTab('n');$('wxTabT').onclick=()=>setTab('t');
+$('wxRescan').onclick=()=>scanLoad(true);
+$('wxMore').onclick=()=>{scanAll=!scanAll;renderScan()};
+$('wxScan').addEventListener('click',e=>{const b=e.target.closest('[data-pick]');if(!b)return;pick=b.dataset.pick;renderScan();
+  passFor(scan.find(x=>x.s===pick));if(!$('wxPass').disabled)$('wxPass').focus()});
+function renderWx(){
+  const w=state.weather,s=wxSummary(w);
+  $('wxIcon').innerHTML=s.icon;$('wxChipT').textContent=s.chip;$('wxChip').classList.toggle('rain',s.wet);
+  $('wxToday').innerHTML=s.icon+'<span>'+esc(s.line)+'</span>';$('wxToday').classList.toggle('rain',s.wet);
+  renderPlace();renderNets();$('wxOff').hidden=!(w&&w.on);
+}
+function openWx(){const w=state.weather||{};$('wxCity').value=w.city||'';fixing='';netSig='';scan=null;scanAll=false;addTab='n';showAdd(!(state.wifis||[]).length);
+  setMode(w.on&&!w.auto?'city':'auto');
+  $('sheet').inert=false;$('sheet').classList.add('show');$('scrim').classList.add('show');renderWx()}
+function closeWx(){$('sheet').classList.remove('show');$('scrim').classList.remove('show');$('sheet').inert=true;$('wxChip').focus()}
+$('wxChip').onclick=openWx;$('wxClose').onclick=closeWx;$('scrim').onclick=closeWx;
+$('wxModeAuto').onclick=()=>setMode('auto');$('wxModeCity').onclick=()=>{setMode('city');$('wxCity').focus()};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('sheet').classList.contains('show'))closeWx()});
+function addSsid(){return addTab==='n'?pick:$('wxSsid').value.trim()}
+// Saved at once either way; the device then checks it and the label shows how it went.
+async function addNet(){if(!addOpen)return true;const ssid=addSsid(),pass=$('wxPass').disabled?'':$('wxPass').value;if(!ssid)return true;
+  if(await send('POST','/api/wifi',{ssid,pass},'Saved '+ssid+'. Checking it…')){showAdd(false);return true}return false}
+$('wxNetForm').addEventListener('submit',e=>{e.preventDefault();
+  if(!addSsid()){if(addTab==='n')toast('Tap your network in the list');else $('wxSsid').focus();return}addNet()});
+$('wxNets').addEventListener('click',e=>{const r=e.target.closest('[data-rm]'),f=e.target.closest('[data-fix]');
+  if(r){if(fixing===r.dataset.rm)fixing='';send('POST','/api/wifi',{ssid:r.dataset.rm,remove:true},'Removed '+r.dataset.rm)}
+  if(f){fixing=f.dataset.fix;renderNets();$('wxFixPass').focus()}});
+$('wxNets').addEventListener('submit',async e=>{e.preventDefault();const f=e.target.closest('[data-fixf]');if(!f)return;
+  const ssid=f.dataset.fixf,pass=$('wxFixPass').value;if(!pass){$('wxFixPass').focus();return}
+  fixing='';if(!await send('POST','/api/wifi',{ssid,pass},'Password changed. Checking it…'))fixing=ssid;renderNets()});
+$('wxForm').addEventListener('submit',async e=>{e.preventDefault();
+  const city=$('wxCity').value.trim();
+  if(wxMode==='city'&&!city){toast('Type a place first');$('wxCity').focus();return}
+  if(!await addNet())return;                            // a network typed but not added yet
+  if(!(state.wifis||[]).length){toast('Add a Wi-Fi network so the device can get the forecast');showAdd(true);return}
+  if(await send('POST','/api/weather',wxMode==='auto'?{auto:true}:{city},'Saved. The device checks the forecast within a minute.'))closeWx()});
+$('wxOff').onclick=async()=>{if(await send('POST','/api/weather',{off:true},'Weather off'))closeWx()};
+
+/* toast */
+let tt;function toast(m,undo){$('toastT').textContent=m;const u=$('toastUndo');u.hidden=!undo;u.onclick=()=>{hide();undo&&undo()};$('toast').classList.add('show');clearTimeout(tt);tt=setTimeout(hide,undo?5000:2200)}
+function hide(){$('toast').classList.remove('show')}
+
+/* keep in step with the device (tasks checked on the screen show up here) */
+/* ---------- task text size on the device: changes live while dragging, saved on release ---------- */
+const TS_NAMES=['Small','Medium','Large','Extra large'],TS_LH=[17,21,25,27],TS_FS=[13,16,19,22];
+let tsDrag=false,tsTimer=null,tsSent=-1,tsOpen=false,tsSig='';
+// While sliding only CSS variables and ≤12 short texts change: no rows are rebuilt.
+// The device sends where each name gets its "...", worked out with its own fonts (/api/fit),
+// so the cut lands on exactly the same letter as on the screen.
+let tsRows=[],tsFit=null,tsFitSig='';
+function tsShow(v){$('tsName').textContent=TS_NAMES[v];$('ts').setAttribute('aria-valuetext',TS_NAMES[v]);
+  const d=$('dev').style,rh=TS_LH[v]+17;d.setProperty('--fs',TS_FS[v]+'px');d.setProperty('--lh',TS_LH[v]+'px');
+  d.setProperty('--rh',rh+'px');d.setProperty('--rs',rh+6+'px');d.setProperty('--cs',12+v*2+'px');
+  const sp=$('devList').children;for(let i=0;i<tsRows.length;i++){const r=tsRows[i],k=r.k&&r.k[v];
+    sp[i].lastChild.textContent=k>=0?[...r.n].slice(0,k).join('')+'...':r.n}}
+async function fitLoad(sig){if(mock)return;
+  try{const r=await api('GET','/api/fit');tsFit=new Map(r.fit.map(a=>[a[0],a.slice(1)]));tsFitSig=sig;tsSig='';devRows()}catch(e){}}
+// The device lists unfinished tasks first. Rebuilt only when the page is open and the list changed.
+function devRows(){if(!tsOpen)return;const t=[...tasks.filter(x=>!x.d),...tasks.filter(x=>x.d)].slice(0,12);
+  const sig=t.map(x=>x.id+(x.d?'d':'')+x.n).join('|');$('devCnt').textContent=tasks.filter(x=>x.d).length+'/'+tasks.length;
+  if(sig===tsSig)return;tsSig=sig;
+  const exact=!!tsFit&&tsFitSig===sig;if(!exact&&!mock)fitLoad(sig);
+  $('dev').classList.toggle('est',!exact);
+  tsRows=(t.length?t:[{id:0,n:'Example task',d:false}]).map(x=>({n:x.n,k:exact?tsFit.get(x.id):null}));
+  $('devList').innerHTML=tsRows.map((x,i)=>'<li style="--i:'+i+'"'+(t[i]&&t[i].d?' class="d"':'')+'><i></i><span></span></li>').join('');
+  tsShow(+$('ts').value)}
+function renderTs(){devRows();if(tsDrag||typeof state.taskFont!=='number')return;$('ts').value=state.taskFont;tsShow(state.taskFont)}
+async function tsSend(v,preview){try{const s=await api('POST','/api/settings',{taskFont:v,preview});if(!preview){state=s;setStatus(true)}}catch(e){setStatus(false)}}
+$('ts').addEventListener('input',()=>{tsDrag=true;const v=+$('ts').value;tsShow(v);
+  if(v===tsSent)return;clearTimeout(tsTimer);tsTimer=setTimeout(()=>{tsSent=v;tsSend(v,true)},90)});
+$('ts').addEventListener('change',()=>{clearTimeout(tsTimer);const v=+$('ts').value;tsSent=-1;tsSend(v,false).finally(()=>{tsDrag=false;toast('Saved: '+TS_NAMES[v])})});
+// Opens like a page; the phone's back gesture closes it.
+function openTs(){if(tsOpen)return;tsOpen=true;tsSig='';renderTs();const p=$('tsp');p.inert=false;p.classList.add('show');
+  history.pushState({ts:1},'');setTimeout(()=>$('tsBack').focus({preventScroll:true}),250)}
+function closeTs(){if(!tsOpen)return;tsOpen=false;const p=$('tsp');p.classList.remove('show');p.inert=true;$('tsChip').focus({preventScroll:true})}
+$('tsChip').onclick=openTs;$('tsBack').onclick=()=>history.state&&history.state.ts?history.back():closeTs();
+addEventListener('popstate',closeTs);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&tsOpen)$('tsBack').click()});
+
+async function refresh(){if(document.hidden||editing||busy||gesture!=='none')return;
+  try{const s=await api('GET','/api/state');state=s;tasks=s.tasks;setStatus(true);render();renderWx();renderTs();syncClock(s.epoch)}catch(e){setStatus(false)}}
+(async()=>{
+  if(!TOKEN&&!/^(192\.168\.4\.1|chibi\.local)$/.test(location.hostname)){mock=true;$('preview').hidden=false}
+  await refresh();
+  setInterval(refresh,3000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+})();
+})();
+</script>

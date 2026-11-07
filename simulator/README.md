@@ -20,11 +20,13 @@ python3 -m http.server 8000
 Then open <http://localhost:8000>.
 
 **Tip:** if you turn on GitHub Pages for this repository, the simulator also works online at
-`https://YOUR-NAME.github.io/chibi/simulator/`.
+[juncho26.github.io/Chibi-Pomodoro/simulator](https://juncho26.github.io/Chibi-Pomodoro/simulator/).
 
 ## Rebuild it after changing the firmware
 
-You need Python 3 and the Zig compiler, which is installed through pip:
+You need Python 3, git, and the Zig compiler, which is installed through pip. The script uses
+the LVGL that ESP-IDF downloaded for the firmware, or clones LVGL 9.2.2 into `simulator/lvgl`
+the first time.
 
 ```bash
 pip install ziglang

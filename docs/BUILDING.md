@@ -84,8 +84,8 @@ ESP-IDF is Espressif's toolkit for the ESP32. Chibi is built and tested with **v
 ### Build and flash
 
 ```bash
-git clone https://github.com/YOUR-NAME/chibi.git
-cd chibi/firmware
+git clone https://github.com/juncho26/Chibi-Pomodoro.git
+cd Chibi-Pomodoro/firmware
 idf.py set-target esp32s3     # only the first time
 idf.py build
 idf.py -p PORT flash monitor  # PORT is e.g. COM5 on Windows or /dev/ttyACM0 on Linux
@@ -93,8 +93,9 @@ idf.py -p PORT flash monitor  # PORT is e.g. COM5 on Windows or /dev/ttyACM0 on 
 
 - **V1 board?** Run `idf.py menuconfig`, go to **Chibi › Board revision**, choose **V1**, save
   and build again.
-- Everything the build needs is in the repository (LVGL, the screen driver, mDNS), so it
-  doesn't download anything.
+- The first build downloads the libraries Chibi uses (LVGL, the screen driver and mDNS, listed
+  in `firmware/main/idf_component.yml`), so it needs an internet connection. Later builds
+  don't.
 - To leave the monitor, press **Ctrl + ]**.
 
 ### Make a single file to share (like the ones in `prebuilt/`)
