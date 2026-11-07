@@ -1,0 +1,375 @@
+<meta charset="utf-8">
+<title>Chibi Simulator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+/* Layout: the device on a dark workbench, its physical controls (turn, buttons, knock) right under it,
+   the outside world (weather, battery, time, phone page) in a side column that stacks below on a phone. */
+:root {
+  --bg: #0e1013;
+  --bench: #15181c;
+  --panel: #1b1f24;
+  --line: #2b3138;
+  --fg: #e8ebee;
+  --muted: #8b939c;
+  --amber: #ffb547;
+  --sky: #7fb2ff;
+  --mint: #7ee0a0;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { background: var(--bg); color: var(--fg); }
+body { font: 15px/1.5 var(--sans); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 22px 40px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 18px; }
+header { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; }
+h1 { margin: 0; font-size: 21px; font-weight: 600; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); font-size: 14px; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) { .bench { padding: 12px; } .device, .device.port { padding: 10px; border-radius: 16px; } }
+.bench { background: var(--bench); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 16px; min-width: 0; }
+.stage { display: grid; place-items: center; min-width: 0; }
+.device { position: relative; background: linear-gradient(#202328, #16181b); border-radius: 22px; padding: 16px; box-shadow: 0 1px 0 #3a3f46 inset, 0 18px 40px #0008; max-width: 100%; }
+.device.port { padding: 16px; }
+.screen { position: relative; background: #000; border-radius: 6px; overflow: hidden; touch-action: none; }
+canvas { display: block; width: 100%; height: 100%; image-rendering: auto; cursor: pointer; }
+.dim { position: absolute; inset: 0; background: #000; pointer-events: none; }
+.over { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; background: #000d; color: var(--fg); padding: 8px; }
+.over button { margin-top: 8px; }
+.hw { position: absolute; display: flex; gap: 8px; }
+.hw button { font: 600 11px var(--mono); letter-spacing: .06em; padding: 4px 10px; border-radius: 999px; background: #2a2e34; border: 1px solid #3c424a; color: #cfd5db; }
+.hw button.held { background: var(--amber); color: #201505; border-color: var(--amber); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; font: 500 12px var(--mono); color: var(--muted); }
+.chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+.chip b { color: var(--fg); font-weight: 700; }
+.controls { display: grid; gap: 14px; }
+.group { display: grid; gap: 8px; }
+.label { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button { font: 600 14px var(--sans); color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+button:hover { border-color: #46505b; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+button[aria-pressed="true"] { border-color: var(--amber); color: var(--amber); }
+.pose { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pose button { display: grid; justify-items: center; gap: 4px; padding: 10px 6px; }
+.pose svg { width: 44px; height: 30px; }
+.pose small { font-weight: 500; color: var(--muted); font-size: 12px; }
+.pose button[aria-pressed="true"] small { color: var(--amber); }
+.side { display: grid; gap: 14px; min-width: 0; }
+.card { background: var(--bench); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.card h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.seg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+input[type=range] { width: 100%; accent-color: var(--amber); }
+.batt { display: flex; gap: 10px; align-items: center; }
+.batt output { font: 700 14px var(--mono); min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+label.tog { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 14px; }
+.tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 320px; overflow: auto; }
+.tasks li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; }
+.tasks li.done span { color: var(--muted); text-decoration: line-through; }
+.tasks span { overflow-wrap: anywhere; }
+.tasks input { width: 18px; height: 18px; accent-color: var(--mint); }
+.tasks button { padding: 2px 8px; font-size: 13px; color: var(--muted); }
+form.add { display: flex; gap: 8px; }
+form.add input { flex: 1; min-width: 0; font: 15px var(--sans); color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.guide { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 14px; color: #c9cfd5; }
+.guide b { color: var(--fg); font-weight: 600; }
+kbd { font: 600 12px var(--mono); background: #262b31; border: 1px solid #3a4048; border-radius: 5px; padding: 0 5px; }
+.note { font-size: 12.5px; color: var(--muted); margin: 0; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Chibi simulator</h1>
+    <p>The real firmware UI, compiled for the browser: the same screens, animations, timers and rules as on the device.</p>
+  </header>
+
+  <div class="grid">
+    <section class="bench" aria-label="Device">
+      <div class="stage">
+        <div class="device" id="device">
+          <div class="screen" id="screen">
+            <canvas id="cv" width="640" height="172" aria-label="Device screen. Tap, hold or swipe it like the touch screen."></canvas>
+            <div class="dim" id="dim"></div>
+            <div class="over" id="over" hidden></div>
+          </div>
+        </div>
+      </div>
+      <div class="chips" aria-live="polite">
+        <span class="chip" id="cScreen">Home</span>
+        <span class="chip" id="cTimer" hidden></span>
+        <span class="chip" id="cNet" hidden>Wi-Fi on</span>
+      </div>
+      <div class="controls">
+        <div class="group">
+          <span class="label">Turn the device <kbd>1</kbd>–<kbd>4</kbd></span>
+          <div class="pose" id="pose">
+            <button type="button" data-o="0" aria-pressed="true"><svg viewBox="0 0 44 30"><rect x="3" y="9" width="38" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="15" r="1.8" fill="currentColor"/></svg>Home<small>lying flat side</small></button>
+            <button type="button" data-o="1"><svg viewBox="0 0 44 30"><rect x="3" y="9" width="38" height="12" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="34" cy="15" r="1.8" fill="currentColor"/><path d="M22 2a10 10 0 0 1 9 5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M31 7l.4-3.6M31 7l-3.4-.6" stroke="currentColor" stroke-width="1.6"/></svg>Study<small>flipped over</small></button>
+            <button type="button" data-o="2"><svg viewBox="0 0 44 30"><rect x="16" y="1" width="12" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="22" cy="7" r="1.8" fill="currentColor"/></svg>Tasks<small>stood up</small></button>
+            <button type="button" data-o="3"><svg viewBox="0 0 44 30"><rect x="16" y="1" width="12" height="28" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="22" cy="23" r="1.8" fill="currentColor"/></svg>Clear<small>stood upside down</small></button>
+          </div>
+        </div>
+        <div class="group">
+          <span class="label">Buttons and knocks</span>
+          <div class="row">
+            <button type="button" id="boot" title="Press: next / skip. Hold 1.2 s: settings">BOOT <kbd>B</kbd></button>
+            <button type="button" id="pwr" title="Press: screen off or sleep. Hold 3 s: turn off">PWR <kbd>P</kbd></button>
+            <button type="button" id="knock" title="Knock knock … knock: carry mode on/off">Knock ●● ● <kbd>K</kbd></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="card" aria-labelledby="hPhone">
+        <h2 id="hPhone">Phone page</h2>
+        <p class="note">Stands in for the page you open from the QR code: add, check and remove tasks.</p>
+        <ul class="tasks" id="tasks"></ul>
+        <form class="add" id="addForm"><input id="addIn" maxlength="40" placeholder="New task" aria-label="New task"><button type="submit">Add</button></form>
+        <div class="row"><button type="button" id="fill">Fill with sample tasks</button><button type="button" id="clearAll">Remove all</button></div>
+      </section>
+
+      <section class="card" aria-labelledby="hWorld">
+        <h2 id="hWorld">Around the device</h2>
+        <div class="group">
+          <span class="label">Weather today</span>
+          <div class="seg" id="wx">
+            <button type="button" data-w="0" aria-pressed="true">Clear</button>
+            <button type="button" data-w="1" aria-pressed="false">Rain later</button>
+            <button type="button" data-w="2" aria-pressed="false">Raining now</button>
+            <button type="button" data-w="3" aria-pressed="false">Snowing</button>
+          </div>
+        </div>
+        <div class="group">
+          <span class="label">Battery</span>
+          <div class="batt"><input type="range" id="batt" min="0" max="100" value="80" aria-label="Battery level"><output id="battOut">80%</output></div>
+          <label class="tog"><input type="checkbox" id="usb"> Plugged into USB</label>
+        </div>
+        <div class="group">
+          <span class="label">Fast-forward the running timer</span>
+          <div class="row"><button type="button" data-ff="60000">+1 min</button><button type="button" data-ff="300000">+5 min</button><button type="button" data-ff="1500000">To the end</button></div>
+        </div>
+        <div class="group">
+          <span class="label">Start over</span>
+          <div class="row"><button type="button" id="reset">Factory reset</button></div>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="hGuide">
+        <h2 id="hGuide">How to use it</h2>
+        <ul class="guide">
+          <li><b>Study:</b> turn it to Study and the countdown starts. Tap to pause, double-tap to restart, hold to end the session.</li>
+          <li><b>Break:</b> turn back to Home after a session for a break. Leave early (after a minute) for a half break; under a minute it just pauses.</li>
+          <li><b>Tasks:</b> stand it up for the list and QR code. Tap a task to check it, swipe the list to scroll.</li>
+          <li><b>Clear:</b> stand it upside down to slash the checked tasks away.</li>
+          <li><b>Settings:</b> hold BOOT (or the B key) for over a second. Tap − / + to change study and break length. Swipe left on the screen, or press BOOT briefly, for brightness and direction; swipe right to come back.</li>
+          <li><b>Carry:</b> knock ●● ● to lock it for the bag, again to unlock.</li>
+        </ul>
+        <p class="note">Your tasks and settings are kept in this browser. Leave it untouched and it dims, then sleeps, just like the device.</p>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------- board runtime (WASI + device I/O)
+async function createDevice(wasmBytes, opts) {
+  const nvs = opts.nvs; let mem; const t0 = performance.now();
+  const u8 = () => new Uint8Array(mem.buffer), dv = () => new DataView(mem.buffer);
+  const td = new TextDecoder(), te = new TextEncoder();
+  const cstr = p => { const b = u8(); let e = p; while (b[e]) e++; return td.decode(b.subarray(p, e)); };
+  let out = '';
+  const wasi = {
+    fd_write(fd, iovs, n, nw) { const d = dv(); let tot = 0;
+      for (let i = 0; i < n; i++) { const p = d.getUint32(iovs + i * 8, true), l = d.getUint32(iovs + i * 8 + 4, true); out += td.decode(u8().subarray(p, p + l)); tot += l; }
+      d.setUint32(nw, tot, true); if (out.length > 4000) out = ''; return 0; },
+    clock_time_get(id, prec, ptr) {
+      const ms = id === 0 ? Date.now() - new Date().getTimezoneOffset() * 60000 : performance.now() - t0;   // wall clock in local time
+      dv().setBigUint64(ptr, BigInt(Math.round(ms * 1000)) * 1000n, true); return 0; },
+    fd_close: () => 0, fd_seek: () => 70, fd_fdstat_get: () => 8, proc_exit(c) { throw new Error('exit ' + c); },
+  };
+  const sim = {
+    now_us: () => (performance.now() - t0) * 1000,
+    random: () => (Math.random() * 4294967296) >>> 0,
+    nvs_get(k, buf, cap) { const v = nvs.get(cstr(k)); if (!v) return -1; if (buf && cap) u8().set(v.subarray(0, Math.min(cap, v.length)), buf); return v.length; },
+    nvs_set(k, buf, len) { nvs.set(cstr(k), u8().slice(buf, buf + len)); opts.onSave(); },
+    event: (kind, arg) => opts.onEvent(kind, arg),
+  };
+  const inst = (await WebAssembly.instantiate(wasmBytes, { wasi_snapshot_preview1: wasi, sim })).instance;
+  mem = inst.exports.memory; inst.exports._initialize && inst.exports._initialize();
+  const X = inst.exports;
+  let img = null;
+  return {
+    X,
+    draw(ctx) {
+      const w = X.sim_w(), h = X.sim_h(), st = X.sim_stride(), p = X.sim_fb(), b = u8();
+      if (!img || img.width !== w || img.height !== h) img = ctx.createImageData(w, h);
+      const px = img.data;
+      for (let y = 0; y < h; y++) { let s = p + y * st, o = y * w * 4;
+        for (let x = 0; x < w; x++, s += 2, o += 4) { const v = b[s] | (b[s + 1] << 8);
+          px[o] = (v >> 8) & 0xf8 | (v >> 13); px[o + 1] = (v >> 3) & 0xfc | ((v >> 9) & 3); px[o + 2] = (v << 3) & 0xf8 | ((v >> 2) & 7); px[o + 3] = 255; } }
+      if (ctx.canvas.width !== w || ctx.canvas.height !== h) { ctx.canvas.width = w; ctx.canvas.height = h; }
+      ctx.putImageData(img, 0, 0);
+      return { w, h };
+    },
+    setStr(s) { let e = te.encode(s); if (e.length > 120) e = e.subarray(0, 120); const p = X.sim_strbuf(); u8().set(e, p); u8()[p + e.length] = 0; },
+    tasks() { const n = X.sim_task_count(), a = []; for (let i = 0; i < n; i++) a.push({ id: X.sim_task_id(i), done: !!X.sim_task_done(i), name: cstr(X.sim_task_name(i)) }); return a; },
+  };
+}
+
+// ---------------------------------------------------------------- page
+(() => {
+  const $ = id => document.getElementById(id);
+  const cv = $('cv'), ctx = cv.getContext('2d'), screenEl = $('screen'), deviceEl = $('device'), over = $('over'), dim = $('dim');
+  const NAMES = ['Home', 'Study', 'Done', 'Break', 'Tasks', 'Clear', 'Carry', 'Settings', 'Calibrate'];
+  let wasm = null, dev = null, running = false, orient = 0, weather = 0, backlight = 220, pwrState = 'on';
+
+  // storage: NVS blobs kept in this browser
+  const nvs = new Map();
+  try { const raw = JSON.parse(localStorage.getItem('chibi-nvs') || '{}'); for (const k in raw) nvs.set(k, Uint8Array.from(atob(raw[k]), c => c.charCodeAt(0))); } catch (e) {}
+  let saveT = 0;
+  function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { const o = {}; nvs.forEach((v, k) => { let s = ''; v.forEach(b => s += String.fromCharCode(b)); o[k] = btoa(s); }); localStorage.setItem('chibi-nvs', JSON.stringify(o)); } catch (e) {} }, 300); }
+
+  function onEvent(kind, arg) {
+    if (kind === 1) backlight = arg;
+    else if (kind === 2) sleepOrOff('sleep');
+    else if (kind === 3) sleepOrOff('off');
+    else if (kind === 4) $('cNet').hidden = arg === 0, $('cNet').textContent = arg === 1 ? 'Wi-Fi starting' : 'Wi-Fi on';
+  }
+  function sleepOrOff(kind) {
+    running = false; pwrState = kind;
+    over.hidden = false;
+    over.innerHTML = kind === 'sleep'
+      ? '<div><div>Asleep</div><button type="button" id="wake">Wake it (tap, move or PWR)</button></div>'
+      : '<div><div>Turned off</div><button type="button" id="wake">Press PWR to turn on</button></div>';
+    $('wake').onclick = boot;
+  }
+  async function boot() {
+    over.hidden = true; pwrState = 'on';
+    dev = await createDevice(wasm, { nvs, onSave: save, onEvent }); window.chibi = dev;
+    dev.X.sim_battery(+$('batt').value, $('usb').checked ? 1 : 0);
+    dev.X.sim_weather(weather);
+    dev.X.sim_boot(orient);
+    running = true;
+    renderTasks();
+  }
+
+  // frame loop at 60 Hz, like the device's UI task
+  let acc = 0, last = performance.now(), taskSig = '';
+  function loop(t) {
+    acc += Math.min(200, t - last); last = t;
+    if (running && dev) {
+      let n = 0;
+      while (acc >= 1000 / 60 && n < 4) { acc -= 1000 / 60; dev.X.sim_frame(); n++; }
+      if (n >= 4) acc = 0;
+      const { w, h } = dev.draw(ctx);
+      layout(w, h);
+      const on = dev.X.sim_screen_on();
+      dim.style.opacity = !on || backlight <= 0 ? 1 : (1 - Math.min(255, backlight) / 255) * .8;   // backlight level as brightness
+      status();
+    } else acc = 0;
+    requestAnimationFrame(loop);
+  }
+  let lastLay = '';
+  function layout(w, h) {
+    const key = w + 'x' + h; if (key === lastLay) return; lastLay = key;
+    const land = w > h;
+    deviceEl.classList.toggle('port', !land);
+    if (land) { screenEl.style.width = 'min(740px, calc(100vw - 120px))'; screenEl.style.height = 'auto'; screenEl.style.aspectRatio = '640 / 172'; }
+    else { screenEl.style.height = 'min(640px, 70vh)'; screenEl.style.width = 'auto'; screenEl.style.aspectRatio = '172 / 640'; }
+  }
+  function fmt(ms) { const s = Math.ceil(ms / 1000); return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
+  function status() {
+    const s = dev.X.sim_screen(); $('cScreen').innerHTML = '<b>' + NAMES[s] + '</b>';
+    const st = dev.X.sim_session_info(0), br = dev.X.sim_session_info(1), done = dev.X.sim_session_info(3);
+    const c = $('cTimer');
+    if (br > 0) { c.hidden = false; c.textContent = 'Break ' + fmt(br) + ' · sessions today ' + done; }
+    else if (st > 0) { c.hidden = false; c.textContent = 'Study ' + fmt(st) + ' left · sessions today ' + done; }
+    else { c.hidden = done === 0; c.textContent = 'Sessions today ' + done; }
+    const sig = dev.tasks().map(x => x.id + (x.done ? 'x' : 'o') + x.name).join('|');
+    if (sig !== taskSig) renderTasks();
+  }
+
+  // touch on the screen
+  let down = false;
+  function pt(e) { const r = cv.getBoundingClientRect(); return [Math.round((e.clientX - r.left) / r.width * cv.width), Math.round((e.clientY - r.top) / r.height * cv.height)]; }
+  cv.addEventListener('pointerdown', e => { if (!dev || !running) return; down = true; cv.setPointerCapture(e.pointerId); const [x, y] = pt(e); dev.X.sim_touch(x, y, 1); e.preventDefault(); });
+  cv.addEventListener('pointermove', e => { if (!down) return; const [x, y] = pt(e); dev.X.sim_touch(x, y, 1); });
+  const up = e => { if (!down) return; down = false; const [x, y] = pt(e); dev.X.sim_touch(x, y, 0); };
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+
+  // turning
+  const poseBtns = [...document.querySelectorAll('#pose button')];
+  function turn(o) {
+    orient = o; poseBtns.forEach(b => b.setAttribute('aria-pressed', +b.dataset.o === o));
+    if (pwrState === 'sleep') { boot(); return; }        // picking it up wakes it
+    if (dev && running) dev.X.sim_orient(o);
+  }
+  poseBtns.forEach(b => b.onclick = () => turn(+b.dataset.o));
+
+  // hardware buttons: BOOT long = 1.2 s, PWR long = 3 s (sent while held, as on the board)
+  function hwButton(el, shortEv, longEv, longMs) {
+    let t = 0, fired = false, isDown = false;
+    const press = () => { if (isDown) return; isDown = true; fired = false; el.classList.add('held');
+      if (pwrState !== 'on') { if (el.id === 'pwr' || pwrState === 'sleep') boot(); return; }
+      t = setTimeout(() => { fired = true; dev && dev.X.sim_button(longEv); }, longMs); };
+    const release = () => { if (!isDown) return; isDown = false; el.classList.remove('held'); clearTimeout(t); if (!fired && pwrState === 'on' && dev) dev.X.sim_button(shortEv); };
+    el.addEventListener('pointerdown', e => { e.preventDefault(); press(); });
+    el.addEventListener('pointerup', release); el.addEventListener('pointerleave', release);
+    el.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); press(); } });
+    el.addEventListener('keyup', e => { if (e.key === ' ' || e.key === 'Enter') release(); });
+    return { press, release };
+  }
+  const bootBtn = hwButton($('boot'), 1, 2, 1200), pwrBtn = hwButton($('pwr'), 3, 4, 3000);
+  $('knock').onclick = () => { if (pwrState === 'sleep') { boot(); return; } dev && running && dev.X.sim_knock(); };
+
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.repeat) return;
+    if ('1234'.includes(e.key)) turn(+e.key - 1);
+    else if (e.key === 'b' || e.key === 'B') bootBtn.press();
+    else if (e.key === 'p' || e.key === 'P') pwrBtn.press();
+    else if (e.key === 'k' || e.key === 'K') $('knock').click();
+  });
+  document.addEventListener('keyup', e => { if (e.key === 'b' || e.key === 'B') bootBtn.release(); if (e.key === 'p' || e.key === 'P') pwrBtn.release(); });
+
+  // world
+  document.querySelectorAll('#wx button').forEach(b => b.onclick = () => {
+    weather = +b.dataset.w; document.querySelectorAll('#wx button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    dev && dev.X.sim_weather(weather);
+  });
+  const battSync = () => { $('battOut').textContent = $('batt').value + '%'; dev && dev.X.sim_battery(+$('batt').value, $('usb').checked ? 1 : 0); };
+  $('batt').oninput = battSync; $('usb').onchange = battSync;
+  document.querySelectorAll('[data-ff]').forEach(b => b.onclick = () => dev && dev.X.sim_skip(+b.dataset.ff));
+  $('reset').onclick = () => { nvs.clear(); try { localStorage.removeItem('chibi-nvs'); } catch (e) {} boot(); };
+
+  // phone page
+  function renderTasks() {
+    if (!dev) return;
+    const list = dev.tasks(); taskSig = list.map(x => x.id + (x.done ? 'x' : 'o') + x.name).join('|');
+    const ul = $('tasks'); ul.innerHTML = '';
+    if (!list.length) { const li = document.createElement('li'); li.innerHTML = '<span></span><span style="color:var(--muted)">No tasks yet</span><span></span>'; ul.append(li); }
+    list.forEach(t => {
+      const li = document.createElement('li'); if (t.done) li.className = 'done';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = t.done; cb.setAttribute('aria-label', 'Done: ' + t.name);
+      cb.onchange = () => { dev.X.sim_task_toggle(t.id); dev.X.sim_net_activity(); };
+      const sp = document.createElement('span'); sp.textContent = t.name;
+      const del = document.createElement('button'); del.type = 'button'; del.textContent = 'Remove'; del.setAttribute('aria-label', 'Remove ' + t.name);
+      del.onclick = () => { dev.X.sim_task_delete(t.id); dev.X.sim_net_activity(); };
+      li.append(cb, sp, del); ul.append(li);
+    });
+  }
+  const SAMPLES = ['Math worksheet', '線形代数 課題', 'Lab report draft', 'Read chapter 4', 'Email professor', 'Flashcards', 'Print slides', 'Return books', 'Plan the week', 'Gym', 'Laundry', 'Call home', 'Water plants', 'Pay phone bill', 'Club meeting', 'Review notes', 'Buy groceries', 'Fix bike light', 'Practice Fusion model', 'Backup photos'];
+  $('fill').onclick = () => { if (!dev) return; const have = new Set(dev.tasks().map(t => t.name)); for (const s of SAMPLES) { if (dev.X.sim_task_count() >= 20) break; if (have.has(s)) continue; dev.setStr(s); dev.X.sim_task_add(); } dev.X.sim_net_activity(); };
+  $('clearAll').onclick = () => { if (!dev) return; dev.tasks().forEach(t => dev.X.sim_task_delete(t.id)); dev.X.sim_net_activity(); };
+  $('addForm').onsubmit = e => { e.preventDefault(); const v = $('addIn').value.trim(); if (!v || !dev) return; dev.setStr(v); dev.X.sim_task_add(); dev.X.sim_net_activity(); $('addIn').value = ''; };
+
+  fetch('chibi.wasm').then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+    .then(b => { wasm = b; return boot(); })
+    .then(() => requestAnimationFrame(t => { last = t; loop(t); }))
+    .catch(err => { over.hidden = false; over.textContent = 'The firmware could not be loaded (' + err.message + '). Reload the page to try again.'; });
+})();
+</script>
