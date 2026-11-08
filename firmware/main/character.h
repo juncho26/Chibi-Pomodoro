@@ -19,6 +19,7 @@ typedef struct {
     bool tilt_ov_on; float tilt_ov;
     bool gaze_ov_on; float gaze_x, gaze_y;
     bool idle; float breath_amp, breath_ms;
+    bool calm;                         // screen dimmed: hold still, no breathing, blink about once a minute
     bool talk;
     // props
     bool book; float book_a; float page_flip;   // page_flip <0 = none, else 0..1

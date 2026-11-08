@@ -21,6 +21,7 @@ int  power_battery_pct(void);     // 0..100, -1 until the first reading
 int  power_battery_mv(void);
 bool power_on_usb(void);          // USB data host connected (computer); charging likely
 bool power_battery_critical(void);
+int  power_pct_from_mv(int mv);     // rough charge % for a resting voltage
 
 // Buttons -> events
 typedef enum { BTN_NONE, BTN_BOOT_SHORT, BTN_BOOT_LONG, BTN_PWR_SHORT, BTN_PWR_LONG } btn_event_t;

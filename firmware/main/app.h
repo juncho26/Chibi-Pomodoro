@@ -27,5 +27,5 @@ void app_study_reset(void);
 void app_study_toggle_pause(void);  // single tap in Study
 bool app_end_session(void);         // hold on Break (or Home with a paused session): end it, no extension         // double-tap in Study: restart the countdown
 void app_activity(void);
-bool app_dimmed(void);              // screen dimmed after 90 s idle (UI drops to 30 fps)
+bool app_dimmed(void);              // screen dimmed after 90 s idle (the picture drops to 15 fps)
 float app_now_ms(void);

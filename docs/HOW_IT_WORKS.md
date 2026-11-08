@@ -19,6 +19,8 @@ for graphics.
 | `store.c` | Saves tasks, settings, the current session, Wi-Fi networks and calibration to flash (NVS). |
 | `net.c` | Wi-Fi (own hotspot or your home network), the sign-in page trick, the phone page and its API. |
 | `weather.c` | Fetches today's rain forecast from Open-Meteo about once an hour. |
+| `lv_mem_psram.c` | Makes LVGL keep its objects and caches in the 8 MB PSRAM, so the small internal RAM stays free for Wi-Fi and the phone page. |
+| `powerlog.c` | Counts where the battery goes (time per screen, with Wi-Fi on, lit or dimmed) for `/api/diag` and the serial log. |
 | `textfit.c` | Works out where a task name gets "..." on the device, so the phone's preview matches exactly. |
 | `icons.c` | The small icons (check, pause, battery, Wi-Fi…), drawn from shapes. |
 | `fonts/` | The fonts, converted for LVGL (JetBrains Mono for numbers, Noto Sans JP for text). |

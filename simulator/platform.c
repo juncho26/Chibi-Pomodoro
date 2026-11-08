@@ -131,6 +131,10 @@ net_mode_t net_mode(void)
     return s_net;
 }
 int64_t net_last_activity_ms(void) { return s_net_act; }
+int64_t net_last_user_ms(void) { return s_net_act; }
+void powerlog_tick(int dt_ms, int screen, int net_mode, int light, int bright_pct) { (void)dt_ms; (void)screen; (void)net_mode; (void)light; (void)bright_pct; }
+void powerlog_note_sleep(void) {}
+void net_log_status(void) {}
 bool net_quiet_finished(void) { return true; }
 void net_qr_text(char *buf, int len) { snprintf(buf, len, "http://chibi.local/"); }
 

@@ -476,13 +476,18 @@ $('tsChip').onclick=openTs;$('tsBack').onclick=()=>history.state&&history.state.
 addEventListener('popstate',closeTs);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&tsOpen)$('tsBack').click()});
 
-async function refresh(){if(document.hidden||editing||busy||gesture!=='none')return;
+// After 5 minutes nobody touches the page it stops checking in, so the device can turn Wi-Fi off
+// and save battery. The next tap (or coming back to the page) picks it up again.
+let lastUse=Date.now();const IDLE_MS=5*60e3;
+function used(){const asleep=Date.now()-lastUse>IDLE_MS;lastUse=Date.now();if(asleep)setTimeout(refresh,50)}
+['pointerup','keydown'].forEach(t=>addEventListener(t,used,{capture:true,passive:true}));
+async function refresh(){if(document.hidden||editing||busy||gesture!=='none'||Date.now()-lastUse>IDLE_MS)return;
   try{const s=await api('GET','/api/state');state=s;tasks=s.tasks;setStatus(true);render();renderWx();renderTs();syncClock(s.epoch)}catch(e){setStatus(false)}}
 (async()=>{
   if(!TOKEN&&!/^(192\.168\.4\.1|chibi\.local)$/.test(location.hostname)){mock=true;$('preview').hidden=false}
   await refresh();
   setInterval(refresh,3000);
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){lastUse=Date.now();refresh()}});
 })();
 })();
 </script>

@@ -11,9 +11,12 @@ file(GLOB FONT_SRCS "fonts/*.c")
 # LVGL, the screen driver and mDNS are listed in idf_component.yml; ESP-IDF downloads them and
 # adds them here automatically.
 idf_component_register(
-    SRCS "main.c" "power.c" "imu.c" "rtc.c" "display.c" "store.c" "textfit.c" "net.c" "app.c" "ui.c" "character.c" "weather.c" "icons.c" ${FONT_SRCS}
+    SRCS "main.c" "power.c" "powerlog.c" "lv_mem_psram.c" "imu.c" "rtc.c" "display.c" "store.c" "textfit.c" "net.c" "app.c" "ui.c" "character.c" "weather.c" "icons.c" ${FONT_SRCS}
     INCLUDE_DIRS "."
     EMBED_FILES "${WEB_GZ}"
     REQUIRES esp_lcd driver esp_driver_i2c esp_driver_gpio esp_driver_ledc esp_driver_spi esp_driver_usb_serial_jtag
              esp_adc esp_timer esp_wifi esp_netif esp_event esp_http_server json esp_http_client mbedtls nvs_flash lwip esp_pm)
 target_compile_options(${COMPONENT_LIB} PRIVATE -DLV_LVGL_H_INCLUDE_SIMPLE -Wno-unused-function -Wno-format-truncation)
+
+# LVGL allocates through lv_mem_psram.c (in this component): make sure the linker keeps it
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u lv_malloc_core")

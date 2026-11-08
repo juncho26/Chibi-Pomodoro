@@ -51,10 +51,14 @@ void ch_spin_in(float deg) { CH.spin_from = deg; CH.spin_t0 = s_now; CH.tilt = d
 
 static float blink(float t)
 {
+    // calm (dimmed): a blink at a random moment 40-60 s apart, starting from the moment it dims;
+    // back to the usual 2-5.5 s as soon as it brightens
+    static bool was_calm;
+    if (CH.calm != was_calm) { was_calm = CH.calm; if (s_blink_t < 0) s_next_blink = t + (CH.calm ? 40000 + frand() * 20000 : 2000 + frand() * 3500); }
     if (s_blink_t < 0 && t > s_next_blink) s_blink_t = t;
     if (s_blink_t >= 0) {
         float d = t - s_blink_t;
-        if (d > 170) { s_blink_t = -1; s_next_blink = t + 2000 + frand() * 3500; return 1; }
+        if (d > 170) { s_blink_t = -1; s_next_blink = t + (CH.calm ? 40000 + frand() * 20000 : 2000 + frand() * 3500); return 1; }
         return fabsf(cosf(d / 170 * (float)M_PI));
     }
     return 1;
@@ -76,7 +80,7 @@ static float r_lx, r_rx, r_ecy, r_cy, r_sqx, r_sqy, r_px, r_py;
 void ch_step(float t)
 {
     s_now = t;
-    if (CH.idle) idle_behaviour(t);
+    if (CH.idle && !CH.calm) idle_behaviour(t);
     CH.pvx = CH.vx; CH.pvy = CH.vy;
     const float g2 = 0.22f * SP * SP;
     if (CH.grav) {
@@ -130,7 +134,7 @@ void ch_step(float t)
     if (t - CH.spin_t0 < 640) CH.umb_a = 0;            // closed while spinning upright after a turn
     else CH.umb_a += ((CH.umbrella ? 1.f : 0.f) - CH.umb_a) * .08f;
     float hp = -ph * (4 + 2.5f * LS) * mv * S2;
-    float bob = sinf(t / CH.breath_ms) * CH.breath_amp * (1 - mv) * S2;
+    float bob = CH.calm ? 0 : sinf(t / CH.breath_ms) * CH.breath_amp * (1 - mv) * S2;
     float cy = CH.y + hp + bob;
     float sqx = stretchX * (2 - hopSq) * (1 + CH.imp), sqy = stretchY * hopSq / (1 + CH.imp);
     float sp2 = 1 + (stretchX - 1) * .4f;

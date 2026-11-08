@@ -695,10 +695,20 @@ static void rain_init(void)
     for (int i = 0; i < NDROP; i++) rain_drop_reset(i, true);
     RN.check = 60;
 }
+static bool s_calm;
+// The still pose while dimmed: settles at home, gaze and tilt fixed, no props that move.
+static void calm_pose(expr_t e, float gaze_y, float tilt)
+{
+    CH.idle = false; CH.think_on = false; CH.page_flip = -1; CH.zzz = false;
+    CH.expr = e;
+    CH.gaze_ov_on = true; CH.gaze_x = 0; CH.gaze_y = gaze_y;
+    CH.tilt_ov_on = true; CH.tilt_ov = tilt;
+    if (!CH.grav && (CH.tx != CH.home_x || CH.ty != CH.home_y)) ch_seek(CH.home_x, CH.home_y, .01f, 1.5f);
+}
 static void rain_step(void)
 {
     if (--RN.check <= 0) { rain_read(); RN.check = 60; }
-    RN.amt += (RN.target - RN.amt) * .02f;
+    RN.amt += ((s_calm ? 0 : RN.target) - RN.amt) * .02f;   // dimmed: the drops still falling land, no new ones
     int active = RN.amt < .02f ? 0 : (int)(10 + RN.amt * (NDROP - 10));
     for (int i = 0; i < NDROP; i++) {
         float vx = RN.snow ? sinf(s_now / 900 + RN.d[i].ph) * .45f - .1f : -.22f * RN.d[i].v;
@@ -905,8 +915,8 @@ static void tick_home(void)
         if (lt.tm_min != M.minute) {
             M.minute = lt.tm_min;
             char hm[6]; snprintf(hm, sizeof hm, "%02d:%02d", lt.tm_hour, lt.tm_min);
-            digits_set(hm, true);
-            if (!M.ev) { M.ev = 2; M.ev_t0 = s_now; CH.idle = false; }
+            digits_set(hm, !s_calm);                     // dimmed: the new minute just appears
+            if (!M.ev && !s_calm) { M.ev = 2; M.ev_t0 = s_now; CH.idle = false; }
             char date[48]; strftime(date, sizeof date, "%a %m/%d", &lt); relabel(M.l1, date);
         }
     }
@@ -921,6 +931,7 @@ static void tick_home(void)
     }
     // character
     float t = s_now;
+    if (s_calm) { M.ev = 0; M.next_ev = t + 4000; calm_pose(low ? EX_SAD : EX_NORMAL, low ? 3 : 0, low ? 8 : 0); return; }
     if (M.woke && t - M.wake_t < 900) { CH.expr = t - M.wake_t < 450 ? EX_SURPRISED : EX_HAPPY; }
     if (!M.ev) {
         CH.idle = true;
@@ -962,9 +973,11 @@ static void tick_home(void)
 
 // A countdown bar: the coloured part is the time still left. It is pinned to the right end and
 // shrinks from the left until nothing is left.
+static void calm_pose(expr_t e, float gaze_y, float tilt);
 static void bar_left(lv_obj_t *bar, float left)
 {
     int w = (int)lroundf(608 * clampf(left, 0, 1));
+    if (s_calm && w > 8) w = (w + 7) / 8 * 8;            // dimmed: move in 8 px steps (a 5 min break: every 4 s, not twice a second)
     if (w < 2) { set_hidden(bar, true); return; }
     set_hidden(bar, false);
     lv_obj_set_width(bar, w);
@@ -1004,6 +1017,11 @@ static void tick_study(void)
     bar_left(M.bar, 1 - prog);                               // time left: starts full, runs down to nothing
 
     CH.book = !idle;
+    if (s_calm) {                                           // reading quietly (or looking at you when paused)
+        if (M.next_ev < s_now + 5000) M.next_ev = s_now + 5000 + frand() * 15000;   // no thought the moment it brightens
+        calm_pose(idle ? EX_NORMAL : EX_FOCUS, idle ? 0 : 9, 0);
+        return;
+    }
     if (s_now - M.press_t < 900) { CH.expr = s_now - M.press_t < 450 ? EX_SURPRISED : (ss.study_running ? EX_DETERMINED : EX_NORMAL); CH.think_on = false; CH.gaze_ov_on = false; return; }
     if (idle) {                                            // book down, looking at you, slow blink rhythm
         M.next_ev = s_now + 20000 + frand() * 20000;       // no thought right after resuming
@@ -1052,6 +1070,7 @@ static void tick_done(void)
     session_t ss; store_lock(); ss = *store_session(); store_unlock();
     char b[64];
     snprintf(b, sizeof b, "%u", ss.sessions); relabel(M.l1, b);
+    if (s_calm) { calm_pose(EX_HAPPY, -2, 0); return; }     // still smiling, no more jumping
     float d = s_now - s_t0, c = fmodf(d, 5800); int cy = (int)(d / 5800);
     if (cy != M.sec) { M.sec = cy; M.ev = 0; }
     if (ss.skip_break) { CH.expr = EX_NORMAL; CH.tilt_ov_on = true; CH.tilt_ov = sinf(d / 300) * 6; CH.gaze_ov_on = true; CH.gaze_x = 0; CH.gaze_y = -2; return; }
@@ -1083,6 +1102,7 @@ static void tick_break(void)
     float total = ss.break_total_ms > 0 ? ss.break_total_ms : st.break_min * 60000.f;
     bar_left(M.bar, ss.break_left_ms / total);
     float d = s_now - s_t0;
+    if (s_calm && ss.break_left_ms >= 2500) { calm_pose(EX_SLEEP, 4, 9); return; }   // sound asleep, no Zzz
     if (ss.break_left_ms < 2500) { CH.expr = EX_SURPRISED; CH.zzz = false; CH.tilt_ov_on = true; CH.tilt_ov = 0; CH.gaze_ov_on = true; CH.gaze_x = 0; CH.gaze_y = -3; return; }
     float c = fmodf(d, 9000); bool peek = c > 5200 && c < 6600;
     CH.expr = peek ? EX_PEEK : EX_SLEEP; CH.zzz = !peek; CH.tilt_ov_on = true; CH.tilt_ov = peek ? -6 : 9 + sinf(d / 1100) * 3;
@@ -1864,6 +1884,10 @@ void ui_frame(void)
         if (s_scr == SCR_TASKS) { rows_sync(false); M.hop_t = s_now; }
         if (s_scr == SCR_STUDY || s_scr == SCR_HOME) { /* labels refresh themselves */ }
     }
+    // Dimmed: nobody is watching closely, so the character holds still (one blink about a minute)
+    // and the rain stops. Next to nothing changes on the screen, so next to nothing is drawn.
+    s_calm = app_dimmed() && (s_scr == SCR_HOME || s_scr == SCR_STUDY || s_scr == SCR_BREAK || s_scr == SCR_DONE);
+    CH.calm = s_calm;
     s_acc += dt;
     while (s_acc >= 1000.f / 60) {
         s_acc -= 1000.f / 60;

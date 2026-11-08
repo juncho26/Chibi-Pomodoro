@@ -151,7 +151,8 @@ On the page you can:
 
 To save battery, Wi-Fi turns off 5 minutes after you leave the Tasks screen, or after 10
 minutes on Tasks with nobody using the page or touching the device. **Touch the Tasks screen**
-(or stand it up again) to bring it back.
+(or stand it up again) to bring it back. The page itself stops checking in after 5 minutes
+without a tap, so a page left open on your phone doesn't keep Wi-Fi on; tap it to carry on.
 
 ---
 
@@ -183,9 +184,38 @@ backup). Nothing else leaves the device.
 - The small **battery icon** in the corner turns **green while charging** over USB and
   **amber at 15 % or less**.
 - If you leave Chibi alone for 90 seconds, the screen **dims to about 10 %** but keeps showing
-  everything. Any touch, turn or knock brings it back. The screen only turns fully off in
+  everything. To save battery, the character holds still and blinks about once a minute,
+  and the rain stops. Any touch, turn or knock brings it back. The screen only turns fully off in
   carry mode, or when you press PWR.
 - On a nearly empty battery, it shows a low-battery icon and switches itself off safely.
+
+### Where does the battery go?
+
+Chibi counts how it spent its time on battery: on each screen, with Wi-Fi on, and with the
+screen lit or dimmed. There are two ways to see it.
+
+**On a computer (easiest).** Plug Chibi in and open a [serial console](#seeing-what-the-device-is-doing-serial-log).
+Plugging in pauses the count, and every 30 seconds Chibi prints a report like this:
+
+```
+battery: time on battery : 6.5 h (of which 0.2 h in deep sleep)
+battery: Wi-Fi on        : 12% of the time (hotspot 0%)
+battery: screen          : bright 30% (at 40% brightness), dimmed 70%, off 0%
+battery: screens         : home 60% study 30% tasks 10%
+battery: battery         : 4150 mV (100%) -> 3800 mV (52%)
+battery: full charge     : about 13 h at this rate
+```
+
+Unplugging within 10 minutes carries on with the same count. Staying plugged in longer counts
+as charging, and the next unplug starts a new count.
+
+**On your phone.** Open the phone page and add **`api/diag`** right after the first `/` of the
+address, keeping anything that comes after it. On the hotspot that's
+`http://192.168.4.1/api/diag`; on home Wi-Fi it looks like `http://192.168.1.23/api/diag?t=…`.
+The `"battery"` part has the same numbers.
+
+The "full charge" estimate appears once about 8 % of the battery has been used. Switching
+Chibi off with a long press of **PWR**, or letting the battery run out, loses the count.
 
 ---
 

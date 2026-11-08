@@ -4,6 +4,7 @@
 //  then flip for a break (or tap / BOOT to skip it). Knock ●● ● = carry mode: everything freezes and
 //  orientation is ignored until the next knock. Hold BOOT = settings (timers frozen while open).
 #include "app.h"
+#include "powerlog.h"
 #include "weather.h"
 #include "ui.h"
 #include "store.h"
@@ -381,6 +382,7 @@ static void toggle_carry(void)
 static void deep_sleep_now(void)
 {
     ESP_LOGW(TAG, "going to deep sleep");
+    powerlog_note_sleep();
     store_flush();
     net_stop();
     display_backlight(0);
@@ -480,7 +482,7 @@ void app_tick(void)
         default: break;
         }
     }
-    if (net_mode() != NET_OFF && now - net_last_activity_ms() < 2000) app_activity();
+    if (net_mode() != NET_OFF && now - net_last_user_ms() < 2000) app_activity();
 
     // ---- timers (frozen in carry mode and while settings are open) ----
     store_lock();
@@ -526,6 +528,7 @@ void app_tick(void)
         if (s_screen != SCR_TASKS && (net_quiet_finished() || now - net_last_activity_ms() > 5 * 60000)) net_stop();
         else if (s_screen == SCR_TASKS && now - net_last_activity_ms() > 10 * 60000 && now - s_last_act > 10 * 60000) net_stop();
     } else if (s_screen == SCR_TASKS && net_mode() == NET_OFF && display_touch_active()) net_start();
+    { static int64_t last_status; if (net_mode() != NET_OFF && now - last_status > 60000) { last_status = now; net_log_status(); } }
 
     // ---- power ----
     if (power_battery_critical()) shutdown(IC_BATT_LOW);
@@ -536,6 +539,7 @@ void app_tick(void)
     bool net_idle = net_mode() == NET_OFF;
     if (carry && idle > 60000 && net_idle) deep_sleep_now();
     (void)idle_ok;
+    powerlog_tick(dt, s_screen, net_mode(), s_screen_off ? 2 : s_dim ? 1 : 0, app_brightness_pct());
 
     store_flush();
 }

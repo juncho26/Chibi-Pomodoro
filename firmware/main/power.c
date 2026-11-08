@@ -196,6 +196,8 @@ static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t s_cali;
 static int s_mv = -1, s_pct = -1, s_low_count;
 
+static int pct_from_mv(int mv);
+int power_pct_from_mv(int mv) { return pct_from_mv(mv); }
 static int pct_from_mv(int mv)
 {
     static const int tbl[][2] = { {4180,100},{4100,92},{4000,82},{3900,68},{3800,52},{3750,42},{3700,32},{3650,22},{3600,13},{3500,6},{3400,2},{3300,0} };

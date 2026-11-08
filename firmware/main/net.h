@@ -12,7 +12,9 @@ bool net_sta_acquire(int timeout_ms); // blocks; true when online through home W
 void net_sta_release(void);           // done; the app turns Wi-Fi off again unless Tasks is open
 bool net_quiet_finished(void);
 net_mode_t net_mode(void);
-int64_t net_last_activity_ms(void);  // last HTTP request
+void net_log_status(void);           // one line in the serial log: link, address, web page, memory
+int64_t net_last_activity_ms(void);  // last HTTP request (keeps Wi-Fi on)
+int64_t net_last_user_ms(void);      // last request that was more than the page checking in (wakes the screen)
 // What the Tasks screen shows. Valid while mode is NET_STA or NET_AP.
 void net_qr_text(char *buf, int len);
 void net_line1(char *buf, int len);

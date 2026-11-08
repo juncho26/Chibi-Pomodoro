@@ -41,14 +41,22 @@ static void ui_task(void *arg)
 #if CONFIG_PM_ENABLE
         esp_pm_lock_acquire(cpu_lock);
 #endif
+        // Dimmed (left alone for 90 s, so nobody is watching closely): the loop still runs 30 times a
+        // second, so taps are read as quickly as ever, but the picture is drawn on every other pass,
+        // 15 frames a second. Drawing is most of the work, so this roughly halves it while dimmed.
+        // A touch draws at once, and undimming goes straight back to 60.
+        static unsigned pass;
+        bool draw = !app_dimmed() || display_touch_active() || (++pass & 1);
         ui_frame();
         // LVGL wakes its own refresh timer whenever something is invalidated, which made it draw
         // (and send) a half-updated frame inside lv_timer_handler and then draw again below. Only the
         // one lv_refr_now per loop should draw.
         lv_timer_pause(lv_display_get_refr_timer(disp));
         lv_timer_handler();
-        ui_render_prep();
-        lv_refr_now(disp);
+        if (draw) {
+            ui_render_prep();
+            lv_refr_now(disp);
+        }
 #if CONFIG_PM_ENABLE
         esp_pm_lock_release(cpu_lock);
 #endif

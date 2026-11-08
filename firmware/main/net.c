@@ -4,10 +4,12 @@
 #include "store.h"
 #include "rtc.h"
 #include "power.h"
+#include "powerlog.h"
 #include "weather.h"
 #include "display.h"
 #include <string.h>
 #include <errno.h>
+#include "esp_heap_caps.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -101,8 +103,15 @@ typedef struct { char ssid[33]; int8_t rssi; uint8_t open; } seen_t;
 static seen_t s_seen[SEEN_MAX]; static int s_nseen; static int64_t s_seen_at = -1;
 
 net_mode_t net_mode(void) { return s_mode; }
+static volatile bool s_sta_lost;
+static volatile int64_t s_req_at = -1;      // last web request (for the status line)
 int64_t net_last_activity_ms(void) { return s_activity; }
 static void touch_activity(void) { s_activity = esp_timer_get_time() / 1000; }
+// The open page checks /api/state every 3 s. That keeps Wi-Fi on, but on its own it shouldn't keep
+// the screen from dimming: only real use of the page (changes, opening it, text size, scans) does.
+static volatile int64_t s_user;
+int64_t net_last_user_ms(void) { return s_user; }
+static void touch_user(void) { s_user = esp_timer_get_time() / 1000; }
 
 void net_qr_text(char *buf, int len)
 {
@@ -132,11 +141,26 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         s_last_reason = ((wifi_event_sta_disconnected_t *)data)->reason;
         if (s_scanning) return;
         if (s_testing) { s_test_reason = ((wifi_event_sta_disconnected_t *)data)->reason; xEventGroupSetBits(s_ev, EV_FAIL); return; }
+        if (s_mode == NET_STA) {             // the router dropped us: join again (the address may change)
+            ESP_LOGW(TAG, "lost home Wi-Fi (reason %d), joining again", s_last_reason);
+            s_sta_lost = true;
+            esp_wifi_connect();
+            return;
+        }
         if (s_mode == NET_STARTING && ++s_retries < 4) esp_wifi_connect();
         else if (s_mode == NET_STARTING) xEventGroupSetBits(s_ev, EV_FAIL);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t *e = data;
+        ESP_LOGI(TAG, "a phone joined the hotspot (%02x:%02x:..:%02x, free RAM %u)", e->mac[0], e->mac[1], e->mac[5],
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STADISCONNECTED) {
+        ESP_LOGI(TAG, "a phone left the hotspot (reason %d)", (int)((wifi_event_ap_stadisconnected_t *)data)->reason);
+    } else if (base == IP_EVENT && id == IP_EVENT_AP_STAIPASSIGNED) {
+        ESP_LOGI(TAG, "gave the phone the address " IPSTR, IP2STR(&((ip_event_ap_staipassigned_t *)data)->ip));
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = data;
         if (!s_testing) snprintf(s_ip, sizeof s_ip, IPSTR, IP2STR(&e->ip_info.ip));
+        if (s_sta_lost && !s_testing) { s_sta_lost = false; ESP_LOGI(TAG, "home Wi-Fi back, address %s", s_ip); }
         xEventGroupSetBits(s_ev, EV_GOT_IP);
     }
 }
@@ -150,6 +174,7 @@ void net_init(void)
     s_ap = esp_netif_create_default_wifi_ap();
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL);
+    esp_event_handler_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, on_event, NULL);
     uint8_t mac[6]; esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
     snprintf(s_ap_ssid, sizeof s_ap_ssid, "Chibi-%02X%02X", mac[4], mac[5]);
 }
@@ -166,7 +191,7 @@ static void dns_task(void *arg)
     for (int i = 0; i < 20 && bind(sock, (struct sockaddr *)&a, sizeof a) != 0; i++) vTaskDelay(pdMS_TO_TICKS(100));   // the last run may still hold port 53
     struct timeval tv = { .tv_sec = 1 };
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-    uint8_t buf[512];
+    static uint8_t buf[512];                                      // off the stack: this task's stack is small
     while (s_dns_run) {
         struct sockaddr_in from; socklen_t fl = sizeof from;
         int n = recvfrom(sock, buf, sizeof buf - 16, 0, (struct sockaddr *)&from, &fl);
@@ -200,7 +225,8 @@ static void dns_task(void *arg)
 // ------------------------------------------------------------------ HTTP
 static bool authorized(httpd_req_t *r)
 {
-    touch_activity();
+    touch_activity(); s_req_at = esp_timer_get_time();
+    if (r->method != HTTP_GET || (strncmp(r->uri, "/api/state", 10) && strncmp(r->uri, "/api/diag", 9))) touch_user();
     if (s_mode == NET_AP) return true;        // joining the hotspot already needed the password from the screen
     char tok[16] = "";
     if (httpd_req_get_hdr_value_str(r, "X-Token", tok, sizeof tok) != ESP_OK) {
@@ -275,7 +301,8 @@ static esp_err_t send_state(httpd_req_t *r)
 
 static esp_err_t h_index(httpd_req_t *r)
 {
-    touch_activity();
+    touch_activity(); touch_user(); s_req_at = esp_timer_get_time();
+    ESP_LOGI(TAG, "sending the page");
     httpd_resp_set_type(r, "text/html; charset=utf-8");
     httpd_resp_set_hdr(r, "Content-Encoding", "gzip");
     httpd_resp_set_hdr(r, "Cache-Control", "no-store");
@@ -547,13 +574,15 @@ static esp_err_t h_weather(httpd_req_t *r)
 static esp_err_t h_diag(httpd_req_t *r)
 {
     if (!authorized(r)) return ESP_OK;
-    char *buf = malloc(1800);
+    char *buf = malloc(2600);
+    if (!buf) { httpd_resp_send_500(r); return ESP_OK; }
     power_diag_json(buf, 1500);
     int n = strlen(buf);
     if (n > 1 && buf[n - 1] == '}') {           // add the frame-rate readout to the same JSON
         buf[n - 1] = 0;
         char d[256]; display_stats_json(d, sizeof d);
-        snprintf(buf + n - 1, 1800 - n, ",\"display\":%s}", d);
+        char b[640]; powerlog_json(b, sizeof b);
+        snprintf(buf + n - 1, 2600 - n, ",\"display\":%s,\"battery\":%s}", d, b);
     }
     httpd_resp_set_type(r, "application/json");
     httpd_resp_sendstr(r, buf);
@@ -588,7 +617,8 @@ static void http_start(void)
     c.stack_size = 8192;
     c.lru_purge_enable = true;
     c.max_open_sockets = 10;          // phones open a burst of connections right after joining
-    if (httpd_start(&s_http, &c) != ESP_OK) { s_http = NULL; return; }
+    esp_err_t err = httpd_start(&s_http, &c);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "web page server failed to start: %s", esp_err_to_name(err)); s_http = NULL; return; }
     const httpd_uri_t u[] = {
         { "/", HTTP_GET, h_index }, { "/index.html", HTTP_GET, h_index },
         { "/api/state", HTTP_GET, h_state }, { "/api/diag", HTTP_GET, h_diag }, { "/api/fit", HTTP_GET, h_fit }, { "/api/scan", HTTP_GET, h_scan },
@@ -687,13 +717,14 @@ static void start_task(void *arg)
         esp_wifi_start();
         for (int i = 0; i < 30 && s_dns_task; i++) vTaskDelay(pdMS_TO_TICKS(100));   // the previous one is closing
         s_dns_run = true;
-        if (!s_dns_task) xTaskCreate(dns_task, "dns", 3072, NULL, 4, &s_dns_task);
+        if (!s_dns_task) xTaskCreate(dns_task, "dns", 4096, NULL, 4, &s_dns_task);
         http_start();
         snprintf(s_ip, sizeof s_ip, "192.168.4.1");
         s_mode = NET_AP;
     }
     if (!s_quiet) touch_activity();
-    ESP_LOGI(TAG, "network up: %s %s", s_mode == NET_STA ? "home Wi-Fi" : "hotspot", s_ip);
+    ESP_LOGI(TAG, "network up: %s %s (web page %s, free RAM %u)", s_mode == NET_STA ? "home Wi-Fi" : "hotspot", s_ip,
+             s_http ? "ready" : "FAILED TO START", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     vTaskDelete(NULL);
 }
 
@@ -723,6 +754,22 @@ bool net_sta_acquire(int timeout_ms)
     // wait a moment for the clock to sync if it was never set
     for (int t = 0; t < 5000 && !rtc_time_valid(); t += 100) vTaskDelay(pdMS_TO_TICKS(100));
     return true;
+}
+
+void net_log_status(void)
+{
+    if (s_mode == NET_OFF || s_mode == NET_STARTING) return;
+    char link[48] = "";
+    if (s_mode == NET_STA) {
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) snprintf(link, sizeof link, "connected to %s (%d dBm)", (char *)ap.ssid, ap.rssi);
+        else snprintf(link, sizeof link, "NOT connected to the router");
+    } else snprintf(link, sizeof link, "%s", s_ap_ssid);
+    ESP_LOGI(TAG, "Wi-Fi: %s %s, %s, web page %s, last request %llds ago, free RAM %u (largest %u)",
+             s_mode == NET_STA ? "home" : "hotspot", s_ip, link, s_http ? "on" : "OFF",
+             s_req_at < 0 ? -1LL : (long long)((esp_timer_get_time() - s_req_at) / 1000000),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 }
 
 void net_sta_release(void) { if (s_quiet) s_quiet_done = true; }
