@@ -166,7 +166,12 @@ coming, the character holds an umbrella, and it rains (or snows) on the Home scr
    **Type the name** (for example for a phone hotspot that's switched off right now). Enter the
    password and tap **Add network**. You can save up to 3 networks.
    - The label next to each saved network tells you how it went: **Connects ✓**,
-     **Saved · not nearby now**, or **Wrong password** (tap **Fix password**).
+     **Saved · not nearby now**, or **Wrong password** (tap **Fix password**). The network
+     Chibi is on right now says **Connected**.
+   - **Saved · not checked yet** means the network is in range, but Chibi couldn't try the
+     password. When Chibi is on your home Wi-Fi, it can't join another network without
+     dropping the one your phone is using to reach it. The password gets checked the next time
+     Chibi joins that network. To check it now, add it while Chibi is on its own hotspot.
 3. Under **Place**, choose **Near me** (worked out from your internet connection) or
    **Choose a place** and type a city.
 4. Tap **Save**.
@@ -174,8 +179,8 @@ coming, the character holds an umbrella, and it rains (or snows) on the Home scr
 About once an hour, Chibi joins your Wi-Fi for a few seconds, fetches the forecast, sets its
 clock, and turns Wi-Fi off again. The forecast comes from
 [Open-Meteo](https://open-meteo.com) (free, no account). For **Near me**, the approximate
-location comes from [ipinfo.io](https://ipinfo.io) (or [ipapi.co](https://ipapi.co) as a
-backup). Nothing else leaves the device.
+location comes from [ipinfo.io](https://ipinfo.io), with [ip-api.com](https://ip-api.com) and
+[ipapi.co](https://ipapi.co) as backups. If **Near me** can't find you, use **Choose a place**. Nothing else leaves the device.
 
 ---
 

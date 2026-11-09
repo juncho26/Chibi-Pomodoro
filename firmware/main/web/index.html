@@ -359,7 +359,7 @@ function renderPlace(){
   else{p.className='hint';p.textContent='A city, ward or station name in romaji works best. Coordinates like 35.69, 139.98 too.'}
 }
 /* ---------- Wi-Fi: saved list with what the device last learned, and adding by scan or by name ---------- */
-const NS={testing:['busy','Checking…'],ok:['ok','Connects ✓'],wrongpass:['bad','Wrong password'],notnear:['far','Saved · not nearby now'],failed:['bad','Couldn’t connect']};
+const NS={testing:['busy','Checking…'],ok:['ok','Connects ✓'],wrongpass:['bad','Wrong password'],notnear:['far','Saved · not nearby now'],failed:['bad','Couldn’t connect'],unchecked:['far','Saved · not checked yet']};
 let netSig='',fixing='',addOpen=false,addTab='n',scan=null,scanBusy=false,scanAll=false,pick='';
 // Rebuilt only when something changed, so a poll never wipes a password being typed.
 function renderNets(){

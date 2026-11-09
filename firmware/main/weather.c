@@ -2,6 +2,8 @@
 // The device joins home Wi-Fi quietly about once an hour, fetches 48 hours of hourly rain chance
 // and amount, then turns Wi-Fi off again. Nothing is fetched without home Wi-Fi and a place.
 #include "weather.h"
+#include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 #include "store.h"
 #include "net.h"
 #include "rtc.h"
@@ -91,13 +93,21 @@ bool weather_rain_today(rain_info_t *o)
 // ------------------------------------------------------------------ HTTP
 static char *http_get(const char *url, int max)
 {
-    esp_http_client_config_t c = { .url = url, .timeout_ms = 10000, .crt_bundle_attach = esp_crt_bundle_attach, .buffer_size = 2048 };
+    // buffer_size_tx/buffer_size: room for long response headers (some services send many)
+    esp_http_client_config_t c = { .url = url, .timeout_ms = 10000, .crt_bundle_attach = esp_crt_bundle_attach, .buffer_size = 6144, .buffer_size_tx = 1024 };   // over 4 KB: allocated in PSRAM
     esp_http_client_handle_t h = esp_http_client_init(&c);
     if (!h) return NULL;
     char *buf = NULL;
-    if (esp_http_client_open(h, 0) == ESP_OK) {
+    esp_err_t err = esp_http_client_open(h, 0);
+    if (err != ESP_OK)
+        ESP_LOGW(TAG, "couldn't reach %.40s: %s (free RAM %u, largest %u)", url, esp_err_to_name(err),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    else {
         esp_http_client_fetch_headers(h);
-        if (esp_http_client_get_status_code(h) == 200) {
+        int code = esp_http_client_get_status_code(h);
+        if (code != 200) ESP_LOGW(TAG, "%.40s answered %d", url, code);
+        if (code == 200) {
             buf = malloc(max + 1);
             int got = 0, k;
             while (buf && got < max && (k = esp_http_client_read(h, buf + got, max - got)) > 0) got += k;
@@ -175,8 +185,20 @@ static bool ip_locate(wxcfg_t *w)
         }
         cJSON_Delete(j);
     }
-    if (ok) return true;
-    b = http_get("https://ipapi.co/json/", 4096);          // second service if the first is down
+    if (ok) { ESP_LOGI(TAG, "location from ipinfo.io: %s", w->place); return true; }
+    // second service: ip-api.com (plain http, so it works even when a secure connection can't be made)
+    b = http_get("http://ip-api.com/json/?fields=status,lat,lon,city,regionName", 1024);
+    if (b) {
+        cJSON *j = cJSON_Parse(b); free(b);
+        const cJSON *la = cJSON_GetObjectItem(j, "lat"), *lo = cJSON_GetObjectItem(j, "lon"), *ci = cJSON_GetObjectItem(j, "city"), *rg = cJSON_GetObjectItem(j, "regionName");
+        if (cJSON_IsNumber(la) && cJSON_IsNumber(lo)) {
+            w->lat = la->valuedouble; w->lon = lo->valuedouble; ok = true;
+            snprintf(w->place, sizeof w->place, "%s%s%s", cJSON_IsString(ci) ? ci->valuestring : "", cJSON_IsString(ci) && cJSON_IsString(rg) ? ", " : "", cJSON_IsString(rg) ? rg->valuestring : "");
+        }
+        cJSON_Delete(j);
+    }
+    if (ok) { ESP_LOGI(TAG, "location from ip-api.com: %s", w->place); return true; }
+    b = http_get("https://ipapi.co/json/", 4096);          // third service
     if (!b) return false;
     cJSON *j = cJSON_Parse(b); free(b);
     const cJSON *la = cJSON_GetObjectItem(j, "latitude"), *lo = cJSON_GetObjectItem(j, "longitude"), *ci = cJSON_GetObjectItem(j, "city"), *rg = cJSON_GetObjectItem(j, "region");
@@ -265,15 +287,19 @@ static void task(void *arg)
                     if (fetch_forecast(w.lat, w.lon)) {
                         time_t t = time(NULL); struct tm lt; localtime_r(&t, &lt);
                         snprintf(s_status, sizeof s_status, "Updated %02d:%02d", lt.tm_hour, lt.tm_min);
-                        ESP_LOGI(TAG, "forecast updated for %s", w.place);
+                        rain_info_t ri; bool r = weather_rain_today(&ri) && ri.rain;
+                        ESP_LOGI(TAG, "forecast updated for %s: %s", w.place,
+                                 !r ? "no rain today" : ri.now ? (ri.snow ? "snowing now" : "raining now") : (ri.snow ? "snow later today" : "rain later today"));
                         next_try = now + 60 * 60000;
                     } else { snprintf(s_status, sizeof s_status, "Couldn't get the forecast"); next_try = now + 10 * 60000; }
                 } else next_try = now + 10 * 60000;
                 net_sta_release();
             }
         }
+        { static char said[sizeof s_status]; if (strcmp(said, s_status)) { strcpy(said, s_status); ESP_LOGI(TAG, "weather: %s", s_status); } }
         for (int i = 0; i < 30 && !s_poke; i++) vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
-void weather_start(void) { xTaskCreate(task, "weather", 8192, NULL, 2, NULL); }
+// Stack in PSRAM (it never writes to flash): keeps 8 KB of internal RAM free for Wi-Fi.
+void weather_start(void) { xTaskCreateWithCaps(task, "weather", 8192, NULL, 2, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); }

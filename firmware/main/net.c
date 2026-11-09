@@ -10,6 +10,7 @@
 #include <string.h>
 #include <errno.h>
 #include "esp_heap_caps.h"
+#include "freertos/idf_additions.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -57,8 +58,11 @@ static char s_test_ssid[33]; static volatile bool s_testing; static volatile int
 static volatile int s_last_reason;           // why the last join attempt dropped
 // What the device last learned about each saved network (RAM only: no flash writes).
 // Updated by the join test, the hourly forecast join and every scan.
-enum { NS_NONE, NS_TESTING, NS_OK, NS_WRONGPASS, NS_NOTNEAR, NS_FAILED };
-static const char *const NS_NAME[] = { "", "testing", "ok", "wrongpass", "notnear", "failed" };
+// NS_UNCHECKED: in range, but the password couldn't be tried. On home Wi-Fi, Chibi can't join a
+// second network without dropping the one your phone is using to reach it; it gets checked the
+// next time Chibi joins it.
+enum { NS_NONE, NS_TESTING, NS_OK, NS_WRONGPASS, NS_NOTNEAR, NS_FAILED, NS_UNCHECKED };
+static const char *const NS_NAME[] = { "", "testing", "ok", "wrongpass", "notnear", "failed", "unchecked" };
 static struct { char ssid[33]; uint8_t st; } s_ns[MAX_WIFI + 1];
 static portMUX_TYPE s_ns_mux = portMUX_INITIALIZER_UNLOCKED;
 static int ns_get(const char *ssid)
@@ -219,7 +223,7 @@ static void dns_task(void *arg)
     }
     close(sock);
     s_dns_task = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(xTaskGetCurrentTaskHandle());
 }
 
 // ------------------------------------------------------------------ HTTP
@@ -448,8 +452,8 @@ static bool scan_now(void)
         for (int k = 0; k < wl.n; k++) {
             bool here = false; for (int i = 0; i < m && !here; i++) here = !strcmp(tmp[i].ssid, wl.w[k].ssid);
             int st = ns_get(wl.w[k].ssid);
-            if (here && st == NS_NOTNEAR) ns_set(wl.w[k].ssid, NS_NONE);
-            else if (!here && st == NS_NONE && strcmp(wl.w[k].ssid, s_joined)) ns_set(wl.w[k].ssid, NS_NOTNEAR);
+            if (here && st == NS_NOTNEAR) ns_set(wl.w[k].ssid, NS_UNCHECKED);
+            else if (!here && (st == NS_NONE || st == NS_UNCHECKED) && strcmp(wl.w[k].ssid, s_joined)) ns_set(wl.w[k].ssid, NS_NOTNEAR);
         }
     } else ok = false;
     free(rec);
@@ -472,14 +476,15 @@ static void wifi_test_task(void *arg)
         snprintf((char *)wc.sta.password, sizeof wc.sta.password, "%s", wl.w[k].pass);
     }
     for (int t = 0; t < 50 && s_radio_busy; t++) vTaskDelay(pdMS_TO_TICKS(100));   // a scan is finishing
-    int result = NS_FAILED;
+    int result = NS_UNCHECKED;            // stays so if the radio is busy or Wi-Fi went off meanwhile
     if (s_mode == NET_STA) {
-        result = NS_NONE;
+        result = NS_UNCHECKED;
         if (strcmp(s_test_ssid, s_joined) && scan_now()) {
             bool here = false; for (int i = 0; i < s_nseen && !here; i++) here = !strcmp(s_seen[i].ssid, s_test_ssid);
-            result = here ? NS_NONE : NS_NOTNEAR;
+            result = here ? NS_UNCHECKED : NS_NOTNEAR;
         } else if (!strcmp(s_test_ssid, s_joined)) result = NS_OK;
     } else if (s_mode == NET_AP && radio_claim()) {
+        result = NS_FAILED;
         for (int attempt = 0; attempt < 2 && result != NS_OK && result != NS_WRONGPASS && result != NS_NOTNEAR; attempt++) {
             xEventGroupClearBits(s_ev, EV_GOT_IP | EV_FAIL);
             s_testing = true; s_test_reason = 0;
@@ -514,7 +519,7 @@ static esp_err_t h_wifi(httpd_req_t *r)
             snprintf(s_test_ssid, sizeof s_test_ssid, "%s", s->valuestring);
             ns_set(s_test_ssid, NS_TESTING);
             if (xTaskCreate(wifi_test_task, "wifitest", 4096, NULL, 4, NULL) != pdPASS) { ns_set(s_test_ssid, NS_NONE); s_test_ssid[0] = 0; }
-        } else ns_set(s->valuestring, NS_NONE);
+        } else ns_set(s->valuestring, NS_UNCHECKED);   // another check is running
         weather_poke();
     }
     cJSON_Delete(j);
@@ -615,6 +620,10 @@ static void http_start(void)
     c.uri_match_fn = httpd_uri_match_wildcard;
     c.max_uri_handlers = 16;
     c.stack_size = 8192;
+    // The stack goes in PSRAM. After hours on home Wi-Fi the internal RAM was too broken up for an
+    // 8 KB block, and the page server couldn't start. Its handlers never write to flash (saving
+    // happens in the UI task), which is what a PSRAM stack must not do.
+    c.task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
     c.lru_purge_enable = true;
     c.max_open_sockets = 10;          // phones open a burst of connections right after joining
     esp_err_t err = httpd_start(&s_http, &c);
@@ -666,7 +675,7 @@ static void start_task(void *arg)
                     bool here = false; for (int i = 0; i < n && !here; i++) here = !strcmp((char *)rec[i].ssid, wl.w[k].ssid);
                     int st = ns_get(wl.w[k].ssid);
                     if (!here && st != NS_WRONGPASS) ns_set(wl.w[k].ssid, NS_NOTNEAR);
-                    else if (here && st == NS_NOTNEAR) ns_set(wl.w[k].ssid, NS_NONE);
+                    else if (here && st == NS_NOTNEAR) ns_set(wl.w[k].ssid, NS_UNCHECKED);
                 }
             }
             free(rec);
@@ -717,7 +726,7 @@ static void start_task(void *arg)
         esp_wifi_start();
         for (int i = 0; i < 30 && s_dns_task; i++) vTaskDelay(pdMS_TO_TICKS(100));   // the previous one is closing
         s_dns_run = true;
-        if (!s_dns_task) xTaskCreate(dns_task, "dns", 4096, NULL, 4, &s_dns_task);
+        if (!s_dns_task) xTaskCreateWithCaps(dns_task, "dns", 4096, NULL, 4, &s_dns_task, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);   // stack in PSRAM: see http_start
         http_start();
         snprintf(s_ip, sizeof s_ip, "192.168.4.1");
         s_mode = NET_AP;

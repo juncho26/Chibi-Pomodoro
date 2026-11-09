@@ -19,6 +19,6 @@ weather):
 
 - [Open-Meteo](https://open-meteo.com): weather forecast and place search. The data is under
   CC BY 4.0, *Weather data by Open-Meteo.com*.
-- [ipinfo.io](https://ipinfo.io) and [ipapi.co](https://ipapi.co): approximate location for
-  "Near me".
+- [ipinfo.io](https://ipinfo.io), [ip-api.com](https://ip-api.com) and [ipapi.co](https://ipapi.co):
+  approximate location for "Near me".
 - [pool.ntp.org](https://www.ntppool.org): network time, used to set the clock.
