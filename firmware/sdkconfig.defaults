@@ -25,6 +25,10 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_HTTPD_MAX_URI_LEN=256
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 CONFIG_LWIP_MAX_SOCKETS=16
+# Smaller TCP segments (1220 instead of 1440 bytes). Many Japanese home connections carry IPv4 inside
+# an IPv6 tunnel (v6 plus / MAP-E / DS-Lite) with less room per packet; full-size packets from some
+# servers (the forecast server) were silently dropped, so their answers never arrived.
+CONFIG_LWIP_TCP_MSS=1220
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 CONFIG_MDNS_MAX_INTERFACES=3
 # Brownout: keep enabled, log the reason on next boot

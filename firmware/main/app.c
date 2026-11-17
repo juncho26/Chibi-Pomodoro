@@ -447,7 +447,7 @@ void app_init(void)
 // stacks and the screen transfer need. Nearly everything else now lives in PSRAM; this keeps an eye
 // on what is left: a log line every minute, and if it ever gets tight while nobody is using Wi-Fi,
 // Wi-Fi is switched off (it hands back about 50 KB) and comes back on its own when needed.
-#define MEM_TIGHT_LARGEST 12288      // the largest free block below this is "tight"
+#define MEM_TIGHT_LARGEST 8192       // the largest free block below this is "tight"
 static void mem_watch(int64_t now)
 {
     static int64_t last_log, last_check;
