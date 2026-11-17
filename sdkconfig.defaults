@@ -1,0 +1,60 @@
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# Dynamic frequency scaling stays off: with it on, the screen link could stall and freeze the UI
+# CONFIG_PM_ENABLE is not set
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+# 64 KB of internal RAM that ordinary allocations never take: kept for what must be in internal RAM
+# (Wi-Fi, task stacks, the screen's DMA), so they always find room
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+# Wi-Fi and network buffers may use PSRAM too, so a phone joining never runs the internal RAM out
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# Secure connections (the weather) keep their buffers in PSRAM: each one needs about 40 KB, which
+# broke up the internal RAM over a few hours
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_HTTPD_MAX_URI_LEN=256
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+CONFIG_LWIP_MAX_SOCKETS=16
+# Smaller TCP segments (1220 instead of 1440 bytes). Many Japanese home connections carry IPv4 inside
+# an IPv6 tunnel (v6 plus / MAP-E / DS-Lite) with less room per packet; full-size packets from some
+# servers (the forecast server) were silently dropped, so their answers never arrived.
+CONFIG_LWIP_TCP_MSS=1220
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_MDNS_MAX_INTERFACES=3
+# Brownout: keep enabled, log the reason on next boot
+CONFIG_ESP_BROWNOUT_DET=y
+# LVGL
+CONFIG_LV_COLOR_DEPTH_16=y
+# LVGL keeps its objects and caches in PSRAM (main/lv_mem_psram.c): the internal RAM is needed by Wi-Fi
+CONFIG_LV_USE_CUSTOM_MALLOC=y
+CONFIG_LV_USE_CLIB_STRING=y
+CONFIG_LV_USE_CLIB_SPRINTF=y
+CONFIG_LV_OS_NONE=y
+CONFIG_LV_DEF_REFR_PERIOD=16
+CONFIG_LV_USE_QRCODE=y
+CONFIG_LV_USE_LOG=n
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_USE_DEMO_WIDGETS=n
+CONFIG_LV_BUILD_EXAMPLES=n
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
+CONFIG_LV_USE_FLOAT=y
+
+# a hung UI restarts the device (logged) instead of freezing
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=8
+
+# speed: quad flash, bigger caches (the screen work streams through PSRAM)
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
