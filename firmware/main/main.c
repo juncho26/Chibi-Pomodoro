@@ -38,19 +38,45 @@ static void ui_task(void *arg)
     // If the UI ever hangs, the watchdog restarts the device after 8 s (and the restart log says so)
     // instead of leaving a frozen screen.
     esp_task_wdt_add(NULL);
+    // Hitch log: a pass of the loop that starts more than 20 ms after the one before, while running
+    // at 60, is a late frame. Every 5 s, if there were any, the log says how many and what the
+    // slowest one spent its time on.
+    int64_t prev_start = 0, prev_period = 16667, p_logic = 0, p_lvgl = 0, p_draw = 0, win_t0 = esp_timer_get_time();
+    uint32_t late = 0, passes = 0; int64_t worst = 0, w_logic = 0, w_lvgl = 0, w_draw = 0;
     for (;;) {
         esp_task_wdt_reset();
+        int64_t t_start = esp_timer_get_time();
+        if (prev_start && prev_period == 16667) {
+            int64_t gap = t_start - prev_start;
+            passes++;
+            if (gap > 20000) {
+                late++;
+                if (gap > worst) { worst = gap; w_logic = p_logic; w_lvgl = p_lvgl; w_draw = p_draw; }
+            }
+        }
+        if (t_start - win_t0 >= 5000000) {
+            if (late)
+                ESP_LOGI(TAG, "late frames: %lu of %lu; slowest %.1f ms = logic %.1f + LVGL %.1f + drawing %.1f + other tasks/waiting %.1f",
+                         (unsigned long)late, (unsigned long)passes, worst / 1000.f, w_logic / 1000.f, w_lvgl / 1000.f, w_draw / 1000.f,
+                         (worst - w_logic - w_lvgl - w_draw) / 1000.f);
+            win_t0 = t_start; late = passes = 0; worst = 0;
+        }
+        prev_start = t_start;
 #if CONFIG_PM_ENABLE
         esp_pm_lock_acquire(cpu_lock);
 #endif
         ui_frame();
+        int64_t t_logic = esp_timer_get_time();
         // LVGL wakes its own refresh timer whenever something is invalidated, which made it draw
         // (and send) a half-updated frame inside lv_timer_handler and then draw again below. Only the
         // one lv_refr_now per loop should draw.
         lv_timer_pause(lv_display_get_refr_timer(disp));
         lv_timer_handler();
+        int64_t t_lvgl = esp_timer_get_time();
         ui_render_prep();
         lv_refr_now(disp);
+        int64_t t_draw = esp_timer_get_time();
+        p_logic = t_logic - t_start; p_lvgl = t_lvgl - t_logic; p_draw = t_draw - t_lvgl;
 #if CONFIG_PM_ENABLE
         esp_pm_lock_release(cpu_lock);
 #endif
@@ -64,6 +90,7 @@ static void ui_task(void *arg)
         // Always 60 frames a second while anything moves, dimmed or not. While dimmed the screen is
         // calm (see ui.c), so almost nothing moves and almost nothing is drawn anyway.
         const int64_t period = now - last_draw > 400000 ? 50000 : 16667;
+        prev_period = period;
         next += period;
         if (next < now - period) next = now;                 // fell behind: don't try to catch up
         int64_t wait = next - now;

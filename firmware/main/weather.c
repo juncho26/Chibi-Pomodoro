@@ -91,14 +91,15 @@ bool weather_rain_today(rain_info_t *o)
 
 
 // ------------------------------------------------------------------ HTTP
-static char *http_get(const char *url, int max)
+static char *http_get_once(const char *url, int max, esp_err_t *out_err)
 {
     // buffer_size_tx/buffer_size: room for long response headers (some services send many)
-    esp_http_client_config_t c = { .url = url, .timeout_ms = 10000, .crt_bundle_attach = esp_crt_bundle_attach, .buffer_size = 6144, .buffer_size_tx = 1024 };   // over 4 KB: allocated in PSRAM
+    esp_http_client_config_t c = { .url = url, .timeout_ms = 15000, .crt_bundle_attach = esp_crt_bundle_attach, .buffer_size = 6144, .buffer_size_tx = 1024 };   // over 4 KB: allocated in PSRAM
     esp_http_client_handle_t h = esp_http_client_init(&c);
     if (!h) return NULL;
     char *buf = NULL;
     esp_err_t err = esp_http_client_open(h, 0);
+    *out_err = err;
     if (err != ESP_OK)
         ESP_LOGW(TAG, "couldn't reach %.40s: %s (free RAM %u, largest %u)", url, esp_err_to_name(err),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
@@ -117,6 +118,27 @@ static char *http_get(const char *url, int max)
     esp_http_client_close(h);
     esp_http_client_cleanup(h);
     return buf;
+}
+
+// A connection that doesn't open is tried once more. For Open-Meteo, if the secure connection
+// still won't open, the same request goes over plain http (Open-Meteo answers both; only the place's
+// coordinates are sent, no personal data).
+static char *http_get(const char *url, int max)
+{
+    esp_err_t err = ESP_OK;
+    char *b = http_get_once(url, max, &err);
+    if (!b && err != ESP_OK) { vTaskDelay(pdMS_TO_TICKS(1000)); b = http_get_once(url, max, &err); }
+    if (!b && err != ESP_OK && !strncmp(url, "https://", 8) && strstr(url, "open-meteo.com/")) {
+        size_t n = strlen(url) + 1;
+        char *plain = malloc(n);
+        if (plain) {
+            snprintf(plain, n, "http://%s", url + 8);
+            ESP_LOGW(TAG, "secure connection didn't open: trying plain http");
+            b = http_get_once(plain, max, &err);
+            free(plain);
+        }
+    }
+    return b;
 }
 
 static void url_encode(const char *s, char *out, int len)

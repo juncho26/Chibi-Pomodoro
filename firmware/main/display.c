@@ -203,11 +203,12 @@ static void stats_frame_done(int64_t now)
         ST.render_ms = ST.render_us / n / 1000.f; ST.conv_ms = ST.conv_us / n / 1000.f; ST.send_ms = ST.send_us / n / 1000.f;
         ST.worst_ms = ST.worst_gap_us / 1000.f;
         snprintf(ST.last_tag, sizeof ST.last_tag, "%s", ST.tag);
-        // "while moving" leaves out the moments nothing changed (nothing is drawn then, on purpose);
-        // "late" counts frames that came more than 20 ms after the one before (a visible hitch)
+        // "moving": the share of time something on screen changed (nothing is drawn otherwise, on
+        // purpose). Late frames are measured in the main loop (main.c), where the cause is known.
         float mv = ST.mov_us ? ST.mov_frames * 1e6f / ST.mov_us : 0, still = 100.f * (1 - (float)ST.mov_us / span);
-        ESP_LOGI(TAG, "%s: %.1f fps while moving, %lu late frames, still %.0f%% of the time | render %.1f ms, convert %.1f ms, send %.1f ms",
-                 ST.last_tag, mv, (unsigned long)ST.late, still < 0 ? 0 : still, ST.render_ms, ST.conv_ms, ST.send_ms);
+        ESP_LOGI(TAG, "%s: %.0f%% of the time moving | render %.1f ms, convert %.1f ms, send %.1f ms",
+                 ST.last_tag, still < 0 ? 100 : 100 - still, ST.render_ms, ST.conv_ms, ST.send_ms);
+        (void)mv;
         ST.win_start = now; ST.win_frames = 0; ST.render_us = ST.conv_us = ST.send_us = 0; ST.worst_gap_us = 0;
         ST.mov_us = ST.mov_frames = ST.late = 0;
     }
