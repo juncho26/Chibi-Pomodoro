@@ -539,7 +539,10 @@ void app_tick(void)
         if (ss->sessions_yday != lt.tm_yday) { if (ss->sessions_yday >= 0) ss->sessions = 0; ss->sessions_yday = lt.tm_yday; store_mark_session(); }
     }
     bool carry = ss->carry, idle_ok = !ss->study_running && !ss->break_active;
-    if (running && now - s_last_save > 120000) { store_mark_session(); s_last_save = now; }   // flash writes pause the whole chip for a moment: every 2 min is enough to survive a power cut
+    // Saving the running timer (so it survives a power cut) writes to flash, which pauses the whole
+    // chip for up to ~0.1 s: a visible hitch if something is moving. So it is saved every 2 minutes
+    // only while the screen is dimmed (nothing moves then), and at the latest every 5 minutes.
+    if (running && now - s_last_save > 120000 && (s_dim || now - s_last_save > 300000)) { store_mark_session(); s_last_save = now; }
     store_unlock();
 
     if (s_cal_step) cal_tick(now);

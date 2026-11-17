@@ -2,6 +2,9 @@
 // The device joins home Wi-Fi quietly about once an hour, fetches 48 hours of hourly rain chance
 // and amount, then turns Wi-Fi off again. Nothing is fetched without home Wi-Fi and a place.
 #include "weather.h"
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
+#include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "freertos/idf_additions.h"
 #include "store.h"
@@ -42,7 +45,7 @@ static RTC_DATA_ATTR wx_cache_t s_c;
 static volatile bool s_poke = true;
 static char s_status[96] = "Not set up";
 
-void weather_poke(void) { s_poke = true; }
+void weather_poke(void) { s_poke = true; snprintf(s_status, sizeof s_status, "Checking\u2026"); }
 void weather_status(char *buf, int len) { snprintf(buf, len, "%s", s_status); }
 
 static int local_day(time_t t, int *hour)
@@ -94,12 +97,24 @@ bool weather_rain_today(rain_info_t *o)
 static char *http_get_once(const char *url, int max, esp_err_t *out_err)
 {
     // buffer_size_tx/buffer_size: room for long response headers (some services send many)
-    esp_http_client_config_t c = { .url = url, .timeout_ms = 15000, .crt_bundle_attach = esp_crt_bundle_attach, .buffer_size = 6144, .buffer_size_tx = 1024 };   // over 4 KB: allocated in PSRAM
+    esp_http_client_config_t c = { .url = url, .timeout_ms = 15000, .crt_bundle_attach = esp_crt_bundle_attach, .buffer_size = 6144, .buffer_size_tx = 1024,
+                                   .addr_type = HTTP_ADDR_TYPE_INET };   // IPv4 only: the board has no IPv6 address   // over 4 KB: allocated in PSRAM
     esp_http_client_handle_t h = esp_http_client_init(&c);
     if (!h) return NULL;
     char *buf = NULL;
     esp_err_t err = esp_http_client_open(h, 0);
     *out_err = err;
+    if (err != ESP_OK) {
+        char host[64] = ""; const char *hs = strstr(url, "://"); hs = hs ? hs + 3 : url;
+        int hl = strcspn(hs, "/:?"); if (hl > 63) hl = 63; memcpy(host, hs, hl); host[hl] = 0;
+        struct addrinfo hints = { .ai_family = AF_INET, .ai_socktype = SOCK_STREAM }, *ai = NULL;
+        int64_t t0 = esp_timer_get_time();
+        int gr = getaddrinfo(host, NULL, &hints, &ai);
+        char ip[16] = "?";
+        if (gr == 0 && ai) inet_ntoa_r(((struct sockaddr_in *)ai->ai_addr)->sin_addr, ip, sizeof ip);
+        ESP_LOGW(TAG, "%s is at %s (looked up in %d ms%s)", host, ip, (int)((esp_timer_get_time() - t0) / 1000), gr ? ", lookup failed" : "");
+        if (ai) freeaddrinfo(ai);
+    }
     if (err != ESP_OK)
         ESP_LOGW(TAG, "couldn't reach %.40s: %s (free RAM %u, largest %u)", url, esp_err_to_name(err),
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
