@@ -18,7 +18,7 @@ for graphics.
 | `rtc.c` | The real-time clock chip (PCF85063), so the time survives sleep and power-off. |
 | `store.c` | Saves tasks, settings, the current session, Wi-Fi networks and calibration to flash (NVS). |
 | `net.c` | Wi-Fi (own hotspot or your home network), the sign-in page trick, the phone page and its API. |
-| `weather.c` | Fetches today's rain forecast from Open-Meteo about once an hour. |
+| `weather.c` | Fetches today's rain forecast about once an hour: Open-Meteo, then JMA (in Japan), then MET Norway. |
 | `lv_mem_psram.c` | Makes LVGL keep its objects and caches in the 8 MB PSRAM, so the small internal RAM stays free for Wi-Fi and the phone page. |
 | `powerlog.c` | Counts where the battery goes (time per screen, with Wi-Fi on, lit or dimmed) for `/api/diag` and the serial log. |
 | `textfit.c` | Works out where a task name gets "..." on the device, so the phone's preview matches exactly. |
@@ -55,6 +55,12 @@ most screens are landscape. `display.c` does this:
    the next frame is being drawn.
 4. This panel can't start a transfer in the middle of the screen, so each frame sends rows
    from the top down to the **lowest changed row**. Changes near the top are cheap to send.
+
+The clock digits squash and stretch as they bounce. Scaling a picture every frame is slow on
+this chip, so at start-up `ui.c` draws every digit at 16 stretch widths (about 3 MB of PSRAM),
+and the bounce just shows the nearest one. A minute roll costs about 10 ms a frame instead of
+40–50 ms. The old digit that tumbles away is turned by Chibi's own code into a small
+picture, instead of by LVGL every frame.
 
 There are timeouts and recovery on every transfer, so a glitch on the bus can't freeze the UI.
 A watchdog restarts the device if the UI ever stops responding for 8 seconds.

@@ -161,11 +161,11 @@ static irow_t IR1, IR2, IR3;
 
 // ================================================================== squishy digits
 typedef struct {
-    lv_obj_t *l; const lv_font_t *f; char ch[2]; uint32_t col; lv_area_t box; bool box_ok;
+    lv_obj_t *l; const lv_font_t *f; char ch[2]; uint32_t col; lv_area_t box; bool box_ok; int sk;   // sk: stretch level shown
     float x, y, hx, hy, vx, vy, k, c, sx, sv, rip, ripA; bool land, fall; float drop_at; int w, h, yoff;
 } digit_t;
 static digit_t D[6]; static int ND;
-static struct { lv_obj_t *l; bool on; float x, y, vx, vy, rot, vr, a; } G;
+static struct { lv_obj_t *l; bool on; float x, y, vx, vy, rot, vr, a; const lv_draw_buf_t *src; int shown; } G;   // shown: angle drawn (-1 none)
 
 // The big digits are drawn once per character into a picture and reused. Squashing a text label
 // made LVGL redraw the text into a scratch layer and then stretch that layer every frame, for each
@@ -206,8 +206,108 @@ static const lv_image_dsc_t *glyph_img(const lv_font_t *f, char c, uint32_t col)
     s_gc[slot].f = f; s_gc[slot].c = c; s_gc[slot].buf = m;
     return (const lv_image_dsc_t *)m;
 }
+// Pre-made stretch: the bouncing digits squash and stretch. Letting LVGL stretch the picture every
+// frame cost 40-50 ms a frame on the chip, so each digit is stretched once, at start-up, to a set of
+// levels (6 % apart), and the bounce just shows the nearest one. A couple of MB of PSRAM (the
+// log says how much at start-up), none of the internal RAM.
+#define SK_MIN (-8)                 // stretch levels: 1 + k * 6 %, k = -8 .. 7 (0.52 .. 1.42 wide: the range the bounce uses)
+#define SK_MAX 7
+#define SK_STEP .06f
+static struct { const lv_font_t *f; char c; lv_draw_buf_t *buf[SK_MAX - SK_MIN + 1]; } s_gs[22];
+static float sk_scale(int k) { return 1 + k * SK_STEP; }
+static int sk_level(float sx) { int k = (int)lroundf((sx - 1) / SK_STEP); return k < SK_MIN ? SK_MIN : k > SK_MAX ? SK_MAX : k; }
+// The glyph picture stretched to level k (wider by s, shorter by 1/s), around the same point the
+// stretch used before: the middle of the baseline.
+static const lv_image_dsc_t *glyph_stretched(const lv_font_t *f, char c, int k)
+{
+    if (k == 0) return glyph_img(f, c, 0);
+    int slot = -1;
+    for (int i = 0; i < 22; i++) if (s_gs[i].f == f && s_gs[i].c == c) { slot = i; break; }
+    if (slot < 0) for (int i = 0; i < 22; i++) if (!s_gs[i].f) { slot = i; s_gs[i].f = f; s_gs[i].c = c; break; }
+    if (slot < 0) return NULL;
+    lv_draw_buf_t **pb = &s_gs[slot].buf[k - SK_MIN];
+    if (*pb) return (const lv_image_dsc_t *)*pb;
+    const lv_draw_buf_t *src = (const lv_draw_buf_t *)glyph_img(f, c, 0);
+    if (!src) return NULL;
+    int w = src->header.w, h = src->header.h, ss = src->header.stride;
+    float s = sk_scale(k), pw = w / 2.f, ph = h - f->base_line;
+    int W2 = (int)ceilf(w * s), H2 = (int)ceilf(h / s);
+    lv_draw_buf_t *b = lv_draw_buf_create(W2, H2, LV_COLOR_FORMAT_A8, 0);
+    if (!b) return NULL;
+    float qx = pw * s, qy = ph / s;              // the baseline middle in the new picture
+    for (int Y = 0; Y < H2; Y++) {
+        uint8_t *row = b->data + Y * b->header.stride;
+        float sy = (Y + .5f - qy) * s + ph - .5f;
+        int y0 = (int)floorf(sy); float fy = sy - y0;
+        for (int X = 0; X < W2; X++) {
+            float sxp = (X + .5f - qx) / s + pw - .5f;
+            int x0 = (int)floorf(sxp); float fx = sxp - x0;
+            float a = 0;
+            for (int dy = 0; dy < 2; dy++) for (int dx = 0; dx < 2; dx++) {
+                int xx = x0 + dx, yy = y0 + dy;
+                if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+                a += src->data[yy * ss + xx] * (dx ? fx : 1 - fx) * (dy ? fy : 1 - fy);
+            }
+            row[X] = (uint8_t)(a + .5f);
+        }
+    }
+    *pb = b;
+    return (const lv_image_dsc_t *)b;
+}
+
+// The knocked-off digit tumbling away. LVGL turning the picture every frame cost ~30 ms a frame on
+// the chip; drawing the turned digit ourselves (whole degrees, fixed-point, smooth edges) into one
+// of two small pictures takes a few ms, and LVGL then only has to colour and copy it.
+static lv_draw_buf_t *s_gr[2]; static int s_gri, s_grS;
+static void ghost_draw(void)
+{
+    const lv_draw_buf_t *src = G.src;
+    if (!src) return;
+    int deg = (int)lroundf(G.rot) % 360; if (deg < 0) deg += 360;
+    if (deg == G.shown) return;
+    int w = src->header.w, h = src->header.h, ss = src->header.stride;
+    int S = (int)ceilf(sqrtf((float)(w * w + h * h))) + 2;
+    if (S > s_grS) {                                           // (re)made for the biggest digit seen
+        for (int i = 0; i < 2; i++) if (s_gr[i]) { lv_image_cache_drop(s_gr[i]); lv_draw_buf_destroy(s_gr[i]); s_gr[i] = NULL; }
+        for (int i = 0; i < 2; i++) s_gr[i] = lv_draw_buf_create(S, S, LV_COLOR_FORMAT_A8, 0);
+        if (!s_gr[0] || !s_gr[1]) { s_grS = 0; return; }
+        s_grS = S;
+    }
+    S = s_grS;
+    lv_draw_buf_t *b = s_gr[s_gri ^= 1];
+    lv_image_cache_drop(b);
+    float a = deg * (float)M_PI / 180, ca = cosf(a), sa = sinf(a);
+    // each picture pixel looks up where it came from in the upright digit (turned back by the angle)
+    int32_t cs = (int32_t)lroundf(ca * 65536), sn = (int32_t)lroundf(sa * 65536);
+    float half = S / 2.f;
+    for (int Y = 0; Y < S; Y++) {
+        uint8_t *row = b->data + Y * b->header.stride;
+        float u = .5f - half, v = Y + .5f - half;
+        int32_t sx = (int32_t)lroundf((ca * u + sa * v + w / 2.f - .5f) * 65536);
+        int32_t sy = (int32_t)lroundf((-sa * u + ca * v + h / 2.f - .5f) * 65536);
+        for (int X = 0; X < S; X++, sx += cs, sy -= sn) {
+            int x0 = sx >> 16, y0 = sy >> 16;
+            if (x0 < -1 || y0 < -1 || x0 >= w || y0 >= h) { row[X] = 0; continue; }
+            int fx = (sx >> 8) & 255, fy = (sy >> 8) & 255;
+            int p00 = 0, p10 = 0, p01 = 0, p11 = 0;
+            if (x0 >= 0 && y0 >= 0 && x0 + 1 < w && y0 + 1 < h) {
+                const uint8_t *q = src->data + y0 * ss + x0;
+                p00 = q[0]; p10 = q[1]; p01 = q[ss]; p11 = q[ss + 1];
+            } else {
+                if (y0 >= 0)    { if (x0 >= 0) p00 = src->data[y0 * ss + x0];       if (x0 + 1 < w) p10 = src->data[y0 * ss + x0 + 1]; }
+                if (y0 + 1 < h) { if (x0 >= 0) p01 = src->data[(y0 + 1) * ss + x0]; if (x0 + 1 < w) p11 = src->data[(y0 + 1) * ss + x0 + 1]; }
+            }
+            int top = p00 * (256 - fx) + p10 * fx, bot = p01 * (256 - fx) + p11 * fx;
+            row[X] = (uint8_t)((top * (256 - fy) + bot * fy + 32768) >> 16);
+        }
+    }
+    lv_image_set_src(G.l, b);
+    G.shown = deg;
+}
+
 static void digit_char(digit_t *d, char c)
 {
+    d->sk = 0;
     d->ch[0] = c; lv_image_set_src(d->l, glyph_img(d->f, c, d->col));
     lv_obj_set_style_image_recolor(d->l, lv_color_hex(d->col), 0); lv_obj_set_style_image_recolor_opa(d->l, LV_OPA_COVER, 0);
 }
@@ -220,7 +320,10 @@ static void img_scale(lv_obj_t *o, int32_t sx, int32_t sy)
 
 static void digit_place(digit_t *d)
 {
-    lv_obj_set_pos(d->l, (int)(d->x - d->w / 2.f), (int)(d->y - d->yoff));
+    if (!d->sk) { lv_obj_set_pos(d->l, (int)(d->x - d->w / 2.f), (int)(d->y - d->yoff)); return; }
+    // a stretched picture keeps the middle of the baseline where the plain one has it
+    float s = sk_scale(d->sk), pw = d->w / 2.f, ph = d->h - d->f->base_line;
+    lv_obj_set_pos(d->l, (int)lroundf(d->x - d->w / 2.f + pw - pw * s), (int)lroundf(d->y - d->yoff + ph - ph / s));
 }
 
 static void make_digits(const char *txt, const lv_font_t *f, float cx, float cy, uint32_t col)
@@ -267,13 +370,12 @@ static void digit_roll(int i, char c, float delay)
 {
     digit_t *d = &D[i];
     if (d->ch[0] == c) return;
-    G.on = true; lv_image_set_src(G.l, glyph_img(d->f, d->ch[0], d->col)); lv_obj_set_style_image_recolor(G.l, lv_color_hex(d->col), 0); lv_obj_set_style_image_recolor_opa(G.l, LV_OPA_COVER, 0); set_hidden(G.l, false); G.x = d->x; G.y = d->y; G.rot = 0; G.a = 1;
+    G.on = true; G.src = (const lv_draw_buf_t *)glyph_img(d->f, d->ch[0], d->col); G.shown = -1; ghost_draw(); lv_obj_set_style_image_recolor(G.l, lv_color_hex(d->col), 0); lv_obj_set_style_image_recolor_opa(G.l, LV_OPA_COVER, 0); set_hidden(G.l, false); G.x = d->x; G.y = d->y; G.rot = 0; G.a = 1;
 #if DIGIT_GHOST_FADE
     G.vx = 0; G.vy = -.5f * SPD; G.vr = 1.2f * SPD;           // fades where it stood
 #else
     G.vx = 1.1f * SPD; G.vy = -2.6f * SPD; G.vr = 4 * SPD;    // the old digit is knocked off and tumbles away
 #endif
-    lv_image_set_pivot(G.l, d->w / 2, d->h / 2);
     digit_char(d, c);
     d->y = -d->h; d->vx = d->vy = 0; d->fall = true; d->drop_at = s_now + delay;
 }
@@ -328,7 +430,14 @@ static void digits_render(void)
     for (int i = 0; i < ND; i++) {
         digit_t *d = &D[i];
         float sx = clampf(d->sx, .5f, 1.6f), sy = 1 / sx;
-        img_scale(d->l, (int32_t)lroundf(256 * sx), (int32_t)lroundf(256 * sy));
+        // pre-made stretch (see glyph_stretched): swap in the nearest ready picture, no scaling
+        int k = fabsf(sx - 1) < .02f ? 0 : sk_level(sx);
+        if (k != d->sk) {
+            const lv_image_dsc_t *img = glyph_stretched(d->f, d->ch[0], k);
+            if (img || !k) { lv_image_set_src(d->l, img ? img : glyph_img(d->f, d->ch[0], 0)); d->sk = img ? k : 0; }
+        }
+        if (d->sk) { sx = sk_scale(d->sk); sy = 1 / sx; }
+        img_scale(d->l, 256, 256);
         set_opa(d->l, (d->fall && s_now < d->drop_at) ? 0 : 255);
         digit_place(d);
         // LVGL's own repaint box for a stretched picture can miss a sliver at its edge; repaint
@@ -344,8 +453,11 @@ static void digits_render(void)
         }
     }
     if (G.l) {
-        lv_obj_set_pos(G.l, (int)(G.x - D[0].w / 2.f), (int)(G.y - (ND ? D[0].yoff : 0)));
-        { int32_t r = (int32_t)(G.rot * 10) % 3600; if (r < 0) r += 3600; if ((int32_t)lv_image_get_rotation(G.l) != r) lv_image_set_rotation(G.l, r); }
+        if (G.on) ghost_draw();
+        // centred where the upright digit's middle would be (as when LVGL turned it about its middle)
+        float gw = G.src ? G.src->header.w : 0, gh = G.src ? G.src->header.h : 0;
+        float cx = G.x - D[0].w / 2.f + gw / 2, cy = G.y - (ND ? D[0].yoff : 0) + gh / 2;
+        lv_obj_set_pos(G.l, (int)lroundf(cx - s_grS / 2.f), (int)lroundf(cy - s_grS / 2.f));
         set_opa(G.l, (lv_opa_t)(255 * clampf(G.a, 0, 1)));
     }
 }
@@ -1784,7 +1896,7 @@ static void do_show(screen_t s, orient_t o, float turn)
     if (s_page) lv_obj_delete(s_page);
     rows_clear_all();
     memset(&M, 0, sizeof M);
-    ND = 0; G.l = NULL; G.on = false;
+    ND = 0; G.l = NULL; G.on = false; G.src = NULL; G.shown = -1;
     memset(&IR1, 0, sizeof IR1); memset(&IR2, 0, sizeof IR2); memset(&IR3, 0, sizeof IR3);   // no stale pointers into the old page
     s_page = lv_obj_create(lv_screen_active());
     lv_obj_remove_style_all(s_page);
@@ -2056,6 +2168,12 @@ void ui_init(void)
     // Draw the clock digits' pictures once at start-up, so a digit seen for the first time never
     // makes an animation stutter while its picture is drawn.
     for (int k = 0; k < 22; k++) glyph_img(k < 11 ? &font_num132 : &font_num150, "0123456789:"[k % 11], 0xFFFFFF);
+    {   size_t bytes = 0;
+        for (int k = 0; k < 22; k++) for (int l = SK_MIN; l <= SK_MAX; l++) {
+            const lv_draw_buf_t *b = (const lv_draw_buf_t *)glyph_stretched(k < 11 ? &font_num132 : &font_num150, "0123456789:"[k % 11], l);
+            if (b && l) bytes += b->data_size;
+        }
+        ESP_LOGI("ui", "stretched digits ready: %u KB in PSRAM", (unsigned)(bytes / 1024)); }
     for (int len = 4; len <= 17; len++) for (int dx = 0; dx <= 5; dx++) drop_img(len, dx, true);   // ~6 KB in all
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_black(), 0);

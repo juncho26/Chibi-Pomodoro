@@ -19,6 +19,10 @@ weather):
 
 - [Open-Meteo](https://open-meteo.com): weather forecast and place search. The data is under
   CC BY 4.0, *Weather data by Open-Meteo.com*.
+- [api.met.no](https://api.met.no) (Norwegian Meteorological Institute): backup forecast. Data under
+  CC BY 4.0 / NLOD, *Weather data from MET Norway*.
+- [Japan Meteorological Agency](https://www.jma.go.jp) (気象庁): backup forecast in Japan, under the
+  Government of Japan Standard Terms of Use (compatible with CC BY 4.0), *出典：気象庁ホームページ*.
 - [ipinfo.io](https://ipinfo.io), [ip-api.com](https://ip-api.com) and [ipapi.co](https://ipapi.co):
   approximate location for "Near me".
 - [pool.ntp.org](https://www.ntppool.org): network time, used to set the clock.

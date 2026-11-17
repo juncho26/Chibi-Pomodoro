@@ -178,7 +178,10 @@ coming, the character holds an umbrella, and it rains (or snows) on the Home scr
 
 About once an hour, Chibi joins your Wi-Fi for a few seconds, fetches the forecast, sets its
 clock, and turns Wi-Fi off again. The forecast comes from
-[Open-Meteo](https://open-meteo.com) (free, no account). For **Near me**, the approximate
+[Open-Meteo](https://open-meteo.com) (free, no account). If Open-Meteo can't be reached, Chibi
+uses the Japan Meteorological Agency ([気象庁](https://www.jma.go.jp)) when you're in Japan, and the
+Norwegian Meteorological Institute ([api.met.no](https://api.met.no)) everywhere else, or if JMA
+doesn't answer either. For **Near me**, the approximate
 location comes from [ipinfo.io](https://ipinfo.io), with [ip-api.com](https://ip-api.com) and
 [ipapi.co](https://ipapi.co) as backups. If **Near me** can't find you, use **Choose a place**. Nothing else leaves the device.
 
@@ -200,7 +203,7 @@ Chibi counts how it spent its time on battery: on each screen, with Wi-Fi on, an
 screen lit or dimmed. There are two ways to see it.
 
 **On a computer (easiest).** Plug Chibi in and open a [serial console](#seeing-what-the-device-is-doing-serial-log).
-Plugging in pauses the count, and every 30 seconds Chibi prints a report like this:
+Plugging in pauses the count, and Chibi prints a report like this right away and then every 2 minutes:
 
 ```
 battery: time on battery : 6.5 h (of which 0.2 h in deep sleep)

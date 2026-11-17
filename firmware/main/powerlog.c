@@ -1,7 +1,7 @@
 // See powerlog.h. Everything here is a handful of additions per frame; nothing touches flash.
 //
 // Plugging into a computer pauses the count and prints a battery report to the serial log (once
-// right away, then every 30 s), so it can be read in a serial console. A short plug-in only pauses
+// right away, then every 2 minutes), so it can be read in a serial console. A short plug-in only pauses
 // it; staying plugged in for 10 minutes or more counts as charging, and the next unplug starts a
 // new count.
 #include "powerlog.h"
@@ -97,7 +97,7 @@ void powerlog_tick(int dt_ms, int screen, int net_mode, int light, int bright_pc
     if (power_on_usb()) {                       // plugged into a computer: pause and report
         static uint64_t next_report;
         if (!P.usb_since_us) { P.usb_since_us = now_us; next_report = 0; }
-        if (now_us >= next_report) { next_report = now_us + 30000000ULL; report(); }
+        if (now_us >= next_report) { next_report = now_us + 120000000ULL; report(); }   // printing it takes ~50 ms: not too often
         return;
     }
     if (P.usb_since_us) {                       // just unplugged
