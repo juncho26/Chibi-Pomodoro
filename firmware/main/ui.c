@@ -476,13 +476,17 @@ static float rows_base(int n) { return s_scr == SCR_CLEAR ? 506 - n * RSTEP + (R
 // them at once made the first frame after turning the device about 4 ms late. After a turn the
 // page stays invisible for its first 380 ms anyway, so the rows are made two a frame then.
 static bool s_rows_lazy;                   // set while a turned-to screen is built
+static lv_obj_t *s_rows_under;             // Clear: rows made late go under this (the darkening)
 static void row_make_obj(row_t *r)
 {
     r->o = row_obj(s_page, r->name, r->done);
     lv_obj_add_flag(r->o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_style_transform_pivot_x(r->o, 76, 0); lv_obj_set_style_transform_pivot_y(r->o, RH / 2, 0);
     lv_obj_add_event_cb(r->o, row_clicked, LV_EVENT_CLICKED, (void *)(uintptr_t)r->id);
-    lv_obj_set_style_opa(r->o, 0, 0);      // rows_step sets its real opacity and place this frame
+    // fully visible, as rows always were: rows_step fades the ones that fade, and rows waiting
+    // to be cut on Clear must show as they are. On Clear they go under the ultimate's darkening,
+    // as they did when they were made with the page.
+    if (s_scr == SCR_CLEAR && s_rows_under) lv_obj_move_to_index(r->o, lv_obj_get_index(s_rows_under));
 }
 
 // Sync rows with the task list. New rows fade in, removed rows disappear, targets follow the order.
@@ -1195,6 +1199,7 @@ static void build_clear(void)
     rows_sync(true);
     slash_free();
     M.dim = mk_rect(s_page, 0, 0, W, H, 0x000000, 0);
+    s_rows_under = M.dim;
     lv_obj_set_style_bg_opa(M.dim, 0, 0);
     // the tier badge: an icon and a count in a small group that pops in
     M.tier = lv_obj_create(s_page); lv_obj_remove_style_all(M.tier); lv_obj_set_size(M.tier, W, 48); lv_obj_set_pos(M.tier, 0, 514);
@@ -1791,6 +1796,7 @@ static void do_show(screen_t s, orient_t o, float turn)
     lv_obj_add_event_cb(s_page, page_long, LV_EVENT_LONG_PRESSED, NULL);
     lv_obj_set_size(s_overlay, W, H);
     s_t0 = s_now;
+    s_rows_under = NULL;
     s_rows_lazy = turn != 0;                 // turned to: the page is invisible for a moment, rows can wait
     switch (s) {
     case SCR_HOME: build_home(); if (prev == SCR_BREAK) { M.woke = true; M.wake_t = s_now; } break;
