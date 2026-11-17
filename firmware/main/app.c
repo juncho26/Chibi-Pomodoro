@@ -4,6 +4,7 @@
 //  then flip for a break (or tap / BOOT to skip it). Knock ●● ● = carry mode: everything freezes and
 //  orientation is ignored until the next knock. Hold BOOT = settings (timers frozen while open).
 #include "app.h"
+#include "esp_heap_caps.h"
 #include "powerlog.h"
 #include "weather.h"
 #include "ui.h"
@@ -441,6 +442,31 @@ void app_init(void)
     display_backlight(s_bright);
 }
 
+// ---------------------------------------------------------------- memory headroom
+// The chip has 8 MB of PSRAM but only a few hundred KB of fast internal RAM, which Wi-Fi, the task
+// stacks and the screen transfer need. Nearly everything else now lives in PSRAM; this keeps an eye
+// on what is left: a log line every minute, and if it ever gets tight while nobody is using Wi-Fi,
+// Wi-Fi is switched off (it hands back about 50 KB) and comes back on its own when needed.
+#define MEM_TIGHT_LARGEST 12288      // the largest free block below this is "tight"
+static void mem_watch(int64_t now)
+{
+    static int64_t last_log, last_check;
+    if (now - last_check < 2000) return;
+    last_check = now;
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (now - last_log > 60000) {
+        last_log = now;
+        ESP_LOGI(TAG, "memory: internal free %u (largest block %u, lowest ever %u), PSRAM free %u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT), (unsigned)largest,
+                 (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    }
+    if (largest < MEM_TIGHT_LARGEST && net_mode() != NET_OFF && now - net_last_user_ms() > 60000) {
+        ESP_LOGW(TAG, "memory: internal RAM is tight (largest block %u): Wi-Fi off until it's needed", (unsigned)largest);
+        net_stop();
+    }
+}
+
 void app_tick(void)
 {
     int64_t now = now_ms();
@@ -529,6 +555,7 @@ void app_tick(void)
         else if (s_screen == SCR_TASKS && now - net_last_activity_ms() > 10 * 60000 && now - s_last_act > 10 * 60000) net_stop();
     } else if (s_screen == SCR_TASKS && net_mode() == NET_OFF && display_touch_active()) net_start();
     { static int64_t last_status; if (net_mode() != NET_OFF && now - last_status > 60000) { last_status = now; net_log_status(); } }
+    mem_watch(now);
 
     // ---- power ----
     if (power_battery_critical()) shutdown(IC_BATT_LOW);

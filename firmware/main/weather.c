@@ -216,12 +216,16 @@ static bool fetch_forecast(float lat, float lon)
     snprintf(url, sizeof url, "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f"
              "&hourly=precipitation_probability,precipitation,snowfall,weather_code,temperature_2m&forecast_days=2&timezone=auto&timeformat=unixtime", lat, lon);
     char *b = http_get(url, 12000);
-    if (!b) return false;
-    cJSON *j = cJSON_Parse(b); free(b);
+    if (!b) { ESP_LOGW(TAG, "forecast: no answer"); return false; }
+    int blen = strlen(b);
+    cJSON *j = cJSON_Parse(b);
+    if (!j) ESP_LOGW(TAG, "forecast: couldn't read the answer (%d bytes, starts \"%.60s\")", blen, b);
+    free(b);
     cJSON *hr = cJSON_GetObjectItem(j, "hourly");
     cJSON *tm = cJSON_GetObjectItem(hr, "time"), *pp = cJSON_GetObjectItem(hr, "precipitation_probability"), *pr = cJSON_GetObjectItem(hr, "precipitation");
     cJSON *sf = cJSON_GetObjectItem(hr, "snowfall"), *wc = cJSON_GetObjectItem(hr, "weather_code"), *tp = cJSON_GetObjectItem(hr, "temperature_2m");
     bool ok = cJSON_IsArray(tm) && cJSON_GetArraySize(tm) >= 24;
+    if (j && !ok) ESP_LOGW(TAG, "forecast: answer has no hourly data");
     if (ok) {
         wx_cache_t c = { .magic = MAGIC };
         // the first entry is local midnight at the place; use our own clock's day numbering for it
@@ -301,5 +305,12 @@ static void task(void *arg)
     }
 }
 
+static void *json_alloc(size_t n) { void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); return p ? p : malloc(n); }
+static void json_free(void *p) { heap_caps_free(p); }
+
 // Stack in PSRAM (it never writes to flash): keeps 8 KB of internal RAM free for Wi-Fi.
-void weather_start(void) { xTaskCreateWithCaps(task, "weather", 8192, NULL, 2, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); }
+void weather_start(void) {
+    // JSON (the forecast, the phone page's requests) is parsed into hundreds of small pieces; keep
+    // them in PSRAM too. In the small internal RAM, the forecast sometimes couldn't be read at all.
+    cJSON_Hooks hk = { .malloc_fn = json_alloc, .free_fn = json_free };
+    cJSON_InitHooks(&hk); xTaskCreateWithCaps(task, "weather", 8192, NULL, 2, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); }

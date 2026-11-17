@@ -47,6 +47,9 @@ static void set_rot(lv_obj_t *o, int32_t r) { if (lv_obj_get_style_transform_rot
 
 static float frand(void) { return (float)rand() / (float)RAND_MAX; }
 static float easeOut(float p) { return 1 - powf(1 - p, 3); }
+static lv_draw_buf_t *s_slash;                     // the ultimate's big slash, drawn ahead (see draw_slashes)
+static void slash_free(void);
+static void slash_make(void);
 
 static lv_obj_t *s_page, *s_overlay, *s_msg;
 static screen_t s_scr;
@@ -469,6 +472,19 @@ static void scroll_step(void)
 static float rows_base(int n) { return s_scr == SCR_CLEAR ? 506 - n * RSTEP + (RSTEP - RH) : 132; }   // Clear: last row ends at 506, clear of the badge;
 // a long list shows its bottom part there, where the checked tasks (the ones being cleared) are
 
+// Making a row's objects (box, check, text) is the costly part of opening Tasks or Clear: all of
+// them at once made the first frame after turning the device about 4 ms late. After a turn the
+// page stays invisible for its first 380 ms anyway, so the rows are made two a frame then.
+static bool s_rows_lazy;                   // set while a turned-to screen is built
+static void row_make_obj(row_t *r)
+{
+    r->o = row_obj(s_page, r->name, r->done);
+    lv_obj_add_flag(r->o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_style_transform_pivot_x(r->o, 76, 0); lv_obj_set_style_transform_pivot_y(r->o, RH / 2, 0);
+    lv_obj_add_event_cb(r->o, row_clicked, LV_EVENT_CLICKED, (void *)(uintptr_t)r->id);
+    lv_obj_set_style_opa(r->o, 0, 0);      // rows_step sets its real opacity and place this frame
+}
+
 // Sync rows with the task list. New rows fade in, removed rows disappear, targets follow the order.
 static void rows_sync(bool initial)
 {
@@ -479,7 +495,7 @@ static void rows_sync(bool initial)
     // remove rows that no longer exist (unless they are mid-cut)
     for (int i = 0; i < NR; i++) {
         bool keep = false; for (int k = 0; k < tl.n; k++) if (tl.t[k].id == R[i].id) keep = true;
-        if (!keep && !R[i].cut) { lv_obj_delete(R[i].o); R[i] = R[--NR]; i--; }
+        if (!keep && !R[i].cut) { if (R[i].o) lv_obj_delete(R[i].o); R[i] = R[--NR]; i--; }
     }
     int hidden = 0;
     for (int k = 0; k < tl.n; k++) {
@@ -489,14 +505,11 @@ static void rows_sync(bool initial)
         if (!r) {
             r = &R[NR++]; memset(r, 0, sizeof *r);
             r->id = tl.t[k].id; r->done = tl.t[k].done; snprintf(r->name, sizeof r->name, "%s", tl.t[k].name);
-            r->o = row_obj(s_page, r->name, r->done);
             r->y = ty; r->a = initial ? 1 : -.5f;
-            lv_obj_add_flag(r->o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
-            lv_obj_set_style_transform_pivot_x(r->o, 76, 0); lv_obj_set_style_transform_pivot_y(r->o, RH / 2, 0);
-            lv_obj_add_event_cb(r->o, row_clicked, LV_EVENT_CLICKED, (void *)(uintptr_t)r->id);
+            if (!s_rows_lazy) row_make_obj(r);     // else rows_step makes it shortly
         } else if (r->done != tl.t[k].done || strcmp(r->name, tl.t[k].name)) {
             r->done = tl.t[k].done; snprintf(r->name, sizeof r->name, "%s", tl.t[k].name);
-            row_fill(r->o, r->name, r->done);
+            if (r->o) row_fill(r->o, r->name, r->done);
         }
         r->ty = ty;
         if (s_scr != SCR_TASKS && ty + RH > limit) hidden++;
@@ -513,7 +526,7 @@ static void rows_sync(bool initial)
 static void rows_restyle(void)
 {
     for (int i = 0; i < NR; i++) {
-        if (R[i].cut) continue;
+        if (R[i].cut || !R[i].o) continue;
         lv_obj_set_size(R[i].o, 152, RH);
         lv_obj_set_style_transform_pivot_y(R[i].o, RH / 2, 0);
         row_fill(R[i].o, R[i].name, R[i].done);
@@ -522,8 +535,27 @@ static void rows_restyle(void)
     for (int i = 0; i < NR; i++) if (!R[i].cut && R[i].a < 1) R[i].a = 1;   // already on screen: no fade
 }
 
+// Two clipped copies of a task row (top and bottom half) for the cut animation, made hidden.
+static void row_make_halves(row_t *r)
+{
+    for (int h = 0; h < 2; h++) {
+        lv_obj_t *clip = lv_obj_create(s_page);
+        lv_obj_remove_style_all(clip);
+        lv_obj_remove_flag(clip, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(clip, 152, RH / 2);
+        lv_obj_t *copy = row_obj(clip, r->name, r->done);
+        lv_obj_set_pos(copy, 0, h ? -RH / 2 : 0);
+        lv_obj_set_style_transform_pivot_x(clip, 76, 0);
+        lv_obj_set_style_transform_pivot_y(clip, RH / 4, 0);
+        lv_obj_add_flag(clip, LV_OBJ_FLAG_HIDDEN);
+        r->halves[h] = clip;
+    }
+}
+
 static void rows_step(void)
 {
+    bool made_halves = false;
+    for (int i = 0, made = 0; i < NR && made < 2; i++) if (!R[i].o) { row_make_obj(&R[i]); made++; }
     float limit = s_scr == SCR_TASKS ? 430 : 506;
     scroll_step();
     if (s_more && s_scr == SCR_TASKS) {    // "+3": that many more below; scroll to see them
@@ -548,27 +580,21 @@ static void rows_step(void)
             if (!cutting || r->cut) r->y += (r->ty - r->y) * .15f;
             r->a = fminf(1, r->a + .05f);
         }
+        if (!r->o) continue;                     // not made yet (see row_make_obj)
         if (r->cut) {
             float e = s_now - r->cut_t0;
+            // the halves are made ahead of time (hidden), one row a frame: making all five of an
+            // ultimate in the frame they split took about two frames' time and made it hitch
+            if (!r->halves[0] && !made_halves) { row_make_halves(r); made_halves = true; }
             if (e < 0) { lv_obj_set_pos(r->o, 10, (int)r->y); continue; }
             if (e < 260) {
                 lv_obj_set_pos(r->o, 10, (int)r->y);
                 if (e > 140) lv_obj_set_style_bg_color(r->o, lv_color_hex(0xFFFFFF), 0);
                 continue;
             }
-            if (!r->halves[0]) {
-                // split: two clipped copies fly apart
-                for (int h = 0; h < 2; h++) {
-                    lv_obj_t *clip = lv_obj_create(s_page);
-                    lv_obj_remove_style_all(clip);
-                    lv_obj_remove_flag(clip, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-                    lv_obj_set_size(clip, 152, RH / 2);
-                    lv_obj_t *copy = row_obj(clip, r->name, r->done);
-                    lv_obj_set_pos(copy, 0, h ? -RH / 2 : 0);
-                    lv_obj_set_style_transform_pivot_x(clip, 76, 0);
-                    lv_obj_set_style_transform_pivot_y(clip, RH / 4, 0);
-                    r->halves[h] = clip;
-                }
+            if (!r->halves[0]) row_make_halves(r);
+            if (lv_obj_has_flag(r->halves[0], LV_OBJ_FLAG_HIDDEN)) {      // split: two clipped copies fly apart
+                for (int h = 0; h < 2; h++) lv_obj_remove_flag(r->halves[h], LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(r->o, LV_OBJ_FLAG_HIDDEN);
             }
             float p = easeOut(clampf((e - 260) / 540, 0, 1)), k = r->cut_big ? 1.8f : 1;
@@ -631,6 +657,11 @@ static lv_area_t s_ch_box; static bool s_ch_box_ok;   // the character's exact b
 
 // ------------------------------------------------------------------ rain (Home screen)
 #define NDROP 48
+// How many drops fall at once: about two thirds as many as before, each bigger and brighter, so rain
+// is easier to see on the small screen and each frame has less to draw.
+#define RAIN_MIN 5
+#define RAIN_MAX 30
+static int rain_active(void);
 #define NSPL 24
 #define RAIN_FLOOR 140.f
 static struct {
@@ -661,13 +692,14 @@ static bool kept_out(float x0, float y0, float x1, float y1)
     for (int i = 0; i < s_nkeep; i++) if (x1 >= s_keep[i].x1 && x0 <= s_keep[i].x2 && y1 >= s_keep[i].y1 && y0 <= s_keep[i].y2) return true;
     return false;
 }
+static int rain_active(void) { return RN.amt < .02f ? 0 : (int)(RAIN_MIN + RN.amt * (RAIN_MAX - RAIN_MIN)); }
 static void rain_drop_reset(int i, bool anywhere)
 {
     RN.d[i].x = frand() * (W + 40);
     RN.d[i].y = anywhere ? frand() * RAIN_FLOOR : -frand() * 60 - 10;
     RN.d[i].ph = frand() * 6.28f;
-    if (RN.snow) { RN.d[i].v = .55f + frand() * .8f; RN.d[i].len = 1.2f + frand() * 1.4f; }   // len = flake radius
-    else { RN.d[i].v = 6.5f + frand() * 2.5f; RN.d[i].len = 8 + frand() * 6; }
+    if (RN.snow) { RN.d[i].v = .55f + frand() * .8f; RN.d[i].len = 1.8f + frand() * 1.6f; }   // len = flake radius
+    else { RN.d[i].v = 6.5f + frand() * 2.5f; RN.d[i].len = 11 + frand() * 6; }          // 11-17 px long, 3 wide
 }
 static void rain_splash(float x, float y, int n)
 {
@@ -709,7 +741,7 @@ static void rain_step(void)
 {
     if (--RN.check <= 0) { rain_read(); RN.check = 60; }
     RN.amt += ((s_calm ? 0 : RN.target) - RN.amt) * .02f;   // dimmed: the drops still falling land, no new ones
-    int active = RN.amt < .02f ? 0 : (int)(10 + RN.amt * (NDROP - 10));
+    int active = rain_active();
     for (int i = 0; i < NDROP; i++) {
         float vx = RN.snow ? sinf(s_now / 900 + RN.d[i].ph) * .45f - .1f : -.22f * RN.d[i].v;
         RN.d[i].x += vx; RN.d[i].y += RN.d[i].v;
@@ -751,7 +783,7 @@ static const lv_image_dsc_t *drop_img(int len, int dx, bool make)   // make: onl
     lv_canvas_set_draw_buf(cv, b);
     lv_layer_t ly; lv_canvas_init_layer(cv, &ly);
     lv_draw_line_dsc_t l; lv_draw_line_dsc_init(&l);
-    l.color = lv_color_white(); l.width = 2; l.round_start = l.round_end = 1;
+    l.color = lv_color_white(); l.width = 3; l.round_start = l.round_end = 1;
     l.p1.x = 2 + dx; l.p1.y = 2; l.p2.x = 2; l.p2.y = 2 + len;
     lv_draw_line(&ly, &l);
     lv_canvas_finish_layer(cv, &ly);
@@ -783,13 +815,13 @@ static void rain_draw(lv_layer_t *layer)
     for (int i = 0; i < IR_MAX; i++) { keep_obj(IR1.ic[i]); keep_obj(IR1.tx[i]); keep_obj(IR2.ic[i]); keep_obj(IR2.tx[i]); }
     keep_add(W - 30, 7, W - 10, 16);                                   // battery
     { float x0, y0, x1, y1; ch_eye_box(&x0, &y0, &x1, &y1); keep_add(x0, y0, x1, y1); } }
-    int active = RN.amt < .02f ? 0 : (int)(10 + RN.amt * (NDROP - 10));
+    int active = rain_active();
     if (RN.snow) {
         lv_draw_rect_dsc_t f; lv_draw_rect_dsc_init(&f); f.bg_color = lv_color_white(); f.radius = LV_RADIUS_CIRCLE;
         for (int i = 0; i < active; i++) {
             if (RN.d[i].y < -4) continue;
             float r = RN.d[i].len;
-            f.bg_opa = (lv_opa_t)(120 + 50 * r);
+            f.bg_opa = (lv_opa_t)fminf(255, 140 + 35 * r);
             lv_area_t a = { lroundf(RN.d[i].x - r), lroundf(RN.d[i].y - r), lroundf(RN.d[i].x + r), lroundf(RN.d[i].y + r) };
             if (!clip_hit(layer, a.x1, a.y1, a.x2, a.y2) || kept_out(a.x1, a.y1, a.x2, a.y2)) continue;
             lv_draw_rect(layer, &f, &a);
@@ -797,7 +829,7 @@ static void rain_draw(lv_layer_t *layer)
         return;
     }
     lv_draw_line_dsc_t l; lv_draw_line_dsc_init(&l);
-    l.color = lv_color_hex(0x7FB2FF); l.width = 2; l.round_start = l.round_end = 1;
+    l.color = lv_color_hex(0x7FB2FF); l.width = 3; l.round_start = l.round_end = 1;
     lv_draw_image_dsc_t im; lv_draw_image_dsc_init(&im);
     im.recolor = l.color; im.recolor_opa = LV_OPA_COVER;
     for (int i = 0; i < active; i++) {
@@ -806,7 +838,7 @@ static void rain_draw(lv_layer_t *layer)
         if (ax == bx && ay == by) continue;               // LVGL 9.2 zero-length line bug
         if (!clip_hit(layer, LV_MIN(ax, bx) - 2, ay - 2, LV_MAX(ax, bx) + 2, by + 2)) continue;
         if (kept_out(fminf(ax, bx) - 1, ay - 1, fmaxf(ax, bx) + 1, by + 1)) continue;
-        lv_opa_t op = (lv_opa_t)(70 + 60 * fminf(1, RN.amt * 1.5f));
+        lv_opa_t op = (lv_opa_t)(100 + 70 * fminf(1, RN.amt * 1.5f));
         const lv_image_dsc_t *img = drop_img(by - ay, ax - bx, false);
         if (img) {
             im.src = img; im.opa = op;
@@ -827,11 +859,11 @@ static void rain_draw(lv_layer_t *layer)
 #define RAIN_RAW 80
 static int rain_boxes(lv_area_t *o)
 {
-    int n = 0, active = RN.amt < .02f ? 0 : (int)(10 + RN.amt * (NDROP - 10));
+    int n = 0, active = rain_active();
     for (int i = 0; i < active && n < RAIN_RAW; i++) {
         float x = RN.d[i].x, y = RN.d[i].y, l = RN.d[i].len;
         if (RN.snow) { if (y < -4) continue; o[n++] = (lv_area_t){ (int32_t)(x - l) - 2, (int32_t)(y - l) - 2, (int32_t)(x + l) + 2, (int32_t)(y + l) + 2 }; }
-        else { if (y < 0) continue; o[n++] = (lv_area_t){ (int32_t)x - 3, (int32_t)(y - l) - 3, (int32_t)(x + .22f * l) + 3, (int32_t)y + 3 }; }
+        else { if (y < 0) continue; o[n++] = (lv_area_t){ (int32_t)x - 4, (int32_t)(y - l) - 4, (int32_t)(x + .22f * l) + 4, (int32_t)y + 4 }; }
     }
     for (int j = 0; j < NSPL && n < RAIN_RAW; j++) if (RN.s[j].life > 0)
         o[n++] = (lv_area_t){ (int32_t)RN.s[j].x - 3, (int32_t)RN.s[j].y - 3, (int32_t)RN.s[j].x + 3, (int32_t)RN.s[j].y + 3 };
@@ -1161,6 +1193,7 @@ static void build_clear(void)
     CH.ly0 = 570;                                        // below the badge
     { int lvl; store_lock(); lvl = store_settings()->task_font; store_unlock(); tf_set(lvl); }
     rows_sync(true);
+    slash_free();
     M.dim = mk_rect(s_page, 0, 0, W, H, 0x000000, 0);
     lv_obj_set_style_bg_opa(M.dim, 0, 0);
     // the tier badge: an icon and a count in a small group that pops in
@@ -1227,6 +1260,7 @@ static void tick_clear(void)
     if (M.tier_kind == 0) { CH.expr = EX_SAD; CH.tilt_ov_on = true; CH.tilt_ov = sinf(e / 280) * 14; CH.gaze_ov_on = true; CH.gaze_x = sinf(e / 280) * 8; CH.gaze_y = -4; return; }
     if (M.phase == 0) {
         CH.expr = EX_DETERMINED; CH.gaze_ov_on = true; CH.gaze_x = 0; CH.gaze_y = -9; CH.tilt_ov_on = true; CH.tilt_ov = -12;
+        if (M.tier_kind == 3 && e > 300) slash_make();
         if (M.tier_kind == 3 && e > 500) { dim_to((int)(150 * fminf(1, (e - 500) / 600))); CH.scale_t = CH.base * 1.45f; CH.expr = EX_STRAIN; CH.tilt_ov = sinf(e / 40) * 4; }
         float first = M.tier_kind == 3 ? 1360 : 800;
         if (e > first) {
@@ -1245,7 +1279,8 @@ static void tick_clear(void)
             int n = store_task_clear_done();
             for (int i = 0; i < NR; i++) if (R[i].cut) {
                 for (int h = 0; h < 2; h++) if (R[i].halves[h]) lv_obj_delete(R[i].halves[h]);
-                lv_obj_delete(R[i].o); R[i] = R[--NR]; i--;
+                if (R[i].o) lv_obj_delete(R[i].o);
+                R[i] = R[--NR]; i--;
             }
             rows_sync(false);
             ch_hop(3); ch_burst_stars();
@@ -1256,6 +1291,7 @@ static void tick_clear(void)
         }
     } else {
         CH.expr = EX_HAPPY; CH.tilt_ov_on = false; CH.gaze_ov_on = true; CH.gaze_x = 0; CH.gaze_y = -2;
+        slash_free();
         if (lv_obj_get_style_bg_opa(M.dim, 0)) lv_obj_set_style_bg_opa(M.dim, 0, 0);
     }
 }
@@ -1538,6 +1574,62 @@ static void draw_house(lv_layer_t *layer, float d)
     #undef HY
 }
 
+// The ultimate's big slash is two wide anti-aliased lines across the whole list. Drawing a line
+// works out its edge for every pixel of the box around it, which was the most expensive part of
+// the ultimate. It never changes shape, so it is drawn once into a picture (glow and core
+// together) before it is needed; each frame then just stamps that picture, cut to the part that
+// has grown so far and faded as it goes.
+static lv_draw_buf_t *s_slash; static int32_t s_slash_x, s_slash_y;
+#define SLASH_PAD 14
+static void big_slash_geom(float *x0, float *y0, float *x1, float *y1)
+{
+    float ya = 1e9f, yb = -1e9f; for (int k = 0; k < NR; k++) if (R[k].cut) { ya = fminf(ya, R[k].ty); yb = fmaxf(yb, R[k].ty + RH); }
+    *x0 = -10; *y0 = yb + 40; *x1 = 182; *y1 = ya - 30;
+}
+static void slash_free(void) { if (s_slash) { lv_draw_buf_destroy(s_slash); s_slash = NULL; } }
+#define SLASH_BANDS 6
+static int s_slash_band;                            // bands drawn so far; the picture is used once all are
+static void slash_make(void)                        // a band a frame, called from tick_clear
+{
+    float x0, y0, x1, y1; big_slash_geom(&x0, &y0, &x1, &y1);
+    if (!s_slash) {
+        if (y0 <= y1) return;
+        s_slash_x = (int32_t)lroundf(x0) - SLASH_PAD; s_slash_y = (int32_t)lroundf(y1) - SLASH_PAD;
+        int w = (int)lroundf(x1 - x0) + 2 * SLASH_PAD + 1, h = (int)lroundf(y0 - y1) + 2 * SLASH_PAD + 1;
+        s_slash = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_ARGB8888, 0);   // ~250 KB, in PSRAM
+        if (!s_slash) return;
+        lv_draw_buf_clear(s_slash, NULL);
+        s_slash_band = 0;
+        return;
+    }
+    if (s_slash_band >= SLASH_BANDS) return;
+    // Drawn here pixel by pixel (distance from the line, with soft edges), in horizontal bands, one
+    // band a frame during the calm build-up before the cut. (Drawing it with LVGL's line into a
+    // canvas cut to a band overran a buffer inside LVGL, so this does the same job directly.)
+    int w = s_slash->header.w, h = s_slash->header.h, stride = s_slash->header.stride;
+    int b0 = h * s_slash_band / SLASH_BANDS, b1 = h * (s_slash_band + 1) / SLASH_BANDS;
+    float ax = lroundf(x0) - s_slash_x, ay = lroundf(y0) - s_slash_y, bx = lroundf(x1) - s_slash_x, by = lroundf(y1) - s_slash_y;
+    float dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    const float rg = 9 * 2.6f / 2, rc = 9 / 2.f;                 // glow and core half-widths (as the line version)
+    uint32_t red = C_RED; float gr = (red >> 16) & 255, gg = (red >> 8) & 255, gb = red & 255;
+    for (int y = b0; y < b1; y++) {
+        uint8_t *row = s_slash->data + (size_t)y * stride;
+        for (int x = 0; x < w; x++) {
+            float px = x + .5f - ax, py = y + .5f - ay, t = len2 > 0 ? (px * dx + py * dy) / len2 : 0;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            float ex = px - t * dx, ey = py - t * dy, d = sqrtf(ex * ex + ey * ey);
+            float cg = rg + .5f - d, cc = rc + .5f - d;            // coverage, 1 px soft edge
+            if (cg <= 0) continue;
+            cg = cg > 1 ? 1 : cg; cc = cc < 0 ? 0 : cc > 1 ? 1 : cc;
+            float ag = cg * (90 / 255.f), a = cc + ag * (1 - cc);  // white core over the faint red glow
+            float r = (255 * cc + gr * ag * (1 - cc)) / a, g = (255 * cc + gg * ag * (1 - cc)) / a, bl = (255 * cc + gb * ag * (1 - cc)) / a;
+            uint8_t *p = row + x * 4;
+            p[0] = (uint8_t)bl; p[1] = (uint8_t)g; p[2] = (uint8_t)r; p[3] = (uint8_t)(a * 255 + .5f);
+        }
+    }
+    s_slash_band++;
+}
+
 static void draw_slashes(lv_layer_t *layer)
 {
     bool big_done = false;
@@ -1553,13 +1645,25 @@ static void draw_slashes(lv_layer_t *layer)
         float p = clampf(e / (r->cut_big ? 160 : 140), 0, 1), fade = r->cut_big ? (e > 200 ? 1 - (e - 200) / 500 : 1) : (e > 260 ? 1 - (e - 260) / 260 : 1);
         float x0, y0, x1, y1, w;
         if (r->cut_big) {
-            float ya = 1e9f, yb = -1e9f; for (int k = 0; k < NR; k++) if (R[k].cut) { ya = fminf(ya, R[k].ty); yb = fmaxf(yb, R[k].ty + RH); }
-            x0 = -10; y0 = yb + 40; x1 = 182; y1 = ya - 30; w = 9;
+            big_slash_geom(&x0, &y0, &x1, &y1); w = 9;
         } else {
             x0 = r->cut_dir > 0 ? 8 : 164; y0 = r->y + RH + 4; x1 = r->cut_dir > 0 ? 164 : 8; y1 = r->y + 2; w = r->cut_big ? 9 : 3.5f;
         }
         float xe = x0 + (x1 - x0) * p, ye = y0 + (y1 - y0) * p;
         if (lroundf(x0) == lroundf(xe) && lroundf(y0) == lroundf(ye)) continue;   // LVGL 9.2 zero-length line bug
+        if (r->cut_big && s_slash && s_slash_band >= SLASH_BANDS) {   // the ready-made picture, cut to the grown part
+            lv_area_t grow = { (int32_t)fminf(x0, xe) - SLASH_PAD, (int32_t)fminf(y0, ye) - SLASH_PAD, (int32_t)fmaxf(x0, xe) + SLASH_PAD, (int32_t)fmaxf(y0, ye) + SLASH_PAD };
+            lv_area_t keep = layer->_clip_area, c;
+            c.x1 = LV_MAX(keep.x1, grow.x1); c.y1 = LV_MAX(keep.y1, grow.y1); c.x2 = LV_MIN(keep.x2, grow.x2); c.y2 = LV_MIN(keep.y2, grow.y2);
+            if (c.x1 > c.x2 || c.y1 > c.y2) continue;
+            layer->_clip_area = c;
+            lv_draw_image_dsc_t d; lv_draw_image_dsc_init(&d);
+            d.src = s_slash; d.opa = (lv_opa_t)(255 * fade);
+            lv_area_t at = { s_slash_x, s_slash_y, s_slash_x + (int32_t)s_slash->header.w - 1, s_slash_y + (int32_t)s_slash->header.h - 1 };
+            lv_draw_image(layer, &d, &at);
+            layer->_clip_area = keep;
+            continue;
+        }
         lv_draw_line_dsc_t l; lv_draw_line_dsc_init(&l); l.round_start = l.round_end = 1;
         l.p1.x = lroundf(x0); l.p1.y = lroundf(y0); l.p2.x = lroundf(xe); l.p2.y = lroundf(ye);
         l.width = (int32_t)(w * 2.6f); l.color = lv_color_hex(r->cut_big ? C_RED : C_AMBER); l.opa = (lv_opa_t)(90 * fade); lv_draw_line(layer, &l);
@@ -1569,6 +1673,7 @@ static void draw_slashes(lv_layer_t *layer)
 
 
 #define APART(p) 1   // every overlay part is drawn
+#define FLASH_EDGE 5
 static void overlay_draw(lv_event_t *e)
 {
     lv_layer_t *layer = lv_event_get_layer(e);
@@ -1591,10 +1696,14 @@ static void overlay_draw(lv_event_t *e)
             lv_draw_arc(layer, &a);
         }
     }
+    // the ultimate's flash: a white outline around the screen (a white flash over the whole
+    // screen meant blending every pixel, which was the heaviest frame of the ultimate)
     float fe = s_now - s_flash_t;
     if (fe >= 0 && fe < 260) {
-        lv_draw_rect_dsc_t r; lv_draw_rect_dsc_init(&r); r.bg_color = lv_color_white(); r.bg_opa = (lv_opa_t)(217 * (1 - floorf(fe / 33.3f) * 33.3f / 260));
-        lv_area_t a = { 0, 0, W, H }; lv_draw_rect(layer, &r, &a);
+        float a = 1 - floorf(fe / 33.3f) * 33.3f / 260;
+        lv_area_t all = { 0, 0, W - 1, H - 1 };
+        lv_draw_rect_dsc_t r; lv_draw_rect_dsc_init(&r); r.bg_opa = LV_OPA_TRANSP; r.border_color = lv_color_white();
+        r.border_width = FLASH_EDGE; r.border_opa = (lv_opa_t)(255 * a); lv_draw_rect(layer, &r, &all);   // a white outline
     }
 }
 
@@ -1682,6 +1791,7 @@ static void do_show(screen_t s, orient_t o, float turn)
     lv_obj_add_event_cb(s_page, page_long, LV_EVENT_LONG_PRESSED, NULL);
     lv_obj_set_size(s_overlay, W, H);
     s_t0 = s_now;
+    s_rows_lazy = turn != 0;                 // turned to: the page is invisible for a moment, rows can wait
     switch (s) {
     case SCR_HOME: build_home(); if (prev == SCR_BREAK) { M.woke = true; M.wake_t = s_now; } break;
     case SCR_STUDY: build_study(); break;
@@ -1693,6 +1803,7 @@ static void do_show(screen_t s, orient_t o, float turn)
     case SCR_SETTINGS: build_settings(); break;
     case SCR_CAL: build_cal(); break;
     }
+    s_rows_lazy = false;
     s_seen_ver = store_version();
     if (turn != 0) {
         // the character keeps its physical spot: map the old position through the turn, then spin upright
@@ -1806,7 +1917,12 @@ static void ov_invalidate(void)
     static int flash_step = -1;
     int fs = (fe >= 0 && fe < 300) ? (fe < 260 ? (int)floorf(fe / 33.3f) : 8) : -1;
     bool flash_changed = fs != flash_step; flash_step = fs;
-    bool full = (fs >= 0 && flash_changed) || s_now - s_show_t < SHOW_FULL_MS;   // just after a screen change everything is new anyway
+    bool full = s_now - s_show_t < SHOW_FULL_MS;   // just after a screen change everything is new anyway
+    if (fs >= 0 && flash_changed && !full) {       // the flash is only the edges: repaint just those strips when it steps
+        lv_area_t e[4] = { { 0, 0, W - 1, FLASH_EDGE }, { 0, H - 1 - FLASH_EDGE, W - 1, H - 1 },
+                           { 0, 0, FLASH_EDGE, H - 1 }, { W - 1 - FLASH_EDGE, 0, W - 1, H - 1 } };
+        for (int i = 0; i < 4; i++) inv(&e[i]);
+    }
     s_ch_box_ok = false;
     {   lv_area_t fx; bool have = !full && fx_bounds(&fx, ke);
         if (have) inv(&fx);
@@ -1918,8 +2034,11 @@ void ui_render_prep(void)
     digits_render();
     // shaking moves the whole page, so every new position repaints everything: change it every
     // other frame (30 times a second still reads as a shake, at half the cost)
-    static int shake_n;
-    if (s_now < s_shake_until) { if (!(shake_n++ & 1)) lv_obj_set_pos(s_page, (int)((frand() * 2 - 1) * s_shake_amp), (int)((frand() * 2 - 1) * s_shake_amp)); }
+    static int shake_n, shake_fs = -1;
+    float fe = s_now - s_flash_t;
+    bool step = !(shake_n++ & 1);
+    if (fe >= 0 && fe < 260) { int fs = (int)floorf(fe / 33.3f); step = fs != shake_fs; shake_fs = fs; }   // with the flash: on its steps
+    if (s_now < s_shake_until) { if (step) lv_obj_set_pos(s_page, (int)((frand() * 2 - 1) * s_shake_amp), (int)((frand() * 2 - 1) * s_shake_amp)); }
     else lv_obj_set_pos(s_page, 0, 0);
     lv_obj_update_layout(lv_screen_active());   // apply moves now, so their repaint areas are known before ours
     lv_obj_update_layout(lv_layer_top());

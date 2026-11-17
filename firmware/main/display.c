@@ -66,6 +66,7 @@ static struct {
     uint32_t frames, win_frames;
     uint32_t render_us, conv_us, send_us;      // sums over the window
     uint32_t worst_gap_us;
+    uint32_t mov_us, mov_frames, late;   // frames that follow another within 40 ms: the screen is moving
     char tag[16];
     // last finished window
     float fps, render_ms, conv_ms, send_ms, worst_ms;
@@ -190,6 +191,7 @@ static void stats_frame_done(int64_t now)
     if (ST.last_frame) {
         uint32_t gap = (uint32_t)(now - ST.last_frame);
         if (gap < 500000 && gap > ST.worst_gap_us) ST.worst_gap_us = gap;   // ignore idle pauses
+        if (gap < 40000) { ST.mov_us += gap; ST.mov_frames++; if (gap > 20000) ST.late++; }
     }
     ST.last_frame = now;
     ST.frames++; ST.win_frames++;
@@ -201,9 +203,13 @@ static void stats_frame_done(int64_t now)
         ST.render_ms = ST.render_us / n / 1000.f; ST.conv_ms = ST.conv_us / n / 1000.f; ST.send_ms = ST.send_us / n / 1000.f;
         ST.worst_ms = ST.worst_gap_us / 1000.f;
         snprintf(ST.last_tag, sizeof ST.last_tag, "%s", ST.tag);
-        ESP_LOGI(TAG, "%s: %.1f fps (slowest frame %.1f ms) render %.1f ms, convert %.1f ms, send %.1f ms",
-                 ST.last_tag, ST.fps, ST.worst_ms, ST.render_ms, ST.conv_ms, ST.send_ms);
+        // "while moving" leaves out the moments nothing changed (nothing is drawn then, on purpose);
+        // "late" counts frames that came more than 20 ms after the one before (a visible hitch)
+        float mv = ST.mov_us ? ST.mov_frames * 1e6f / ST.mov_us : 0, still = 100.f * (1 - (float)ST.mov_us / span);
+        ESP_LOGI(TAG, "%s: %.1f fps while moving, %lu late frames, still %.0f%% of the time | render %.1f ms, convert %.1f ms, send %.1f ms",
+                 ST.last_tag, mv, (unsigned long)ST.late, still < 0 ? 0 : still, ST.render_ms, ST.conv_ms, ST.send_ms);
         ST.win_start = now; ST.win_frames = 0; ST.render_us = ST.conv_us = ST.send_us = 0; ST.worst_gap_us = 0;
+        ST.mov_us = ST.mov_frames = ST.late = 0;
     }
 }
 

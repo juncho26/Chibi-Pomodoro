@@ -15,6 +15,8 @@
 #include "display.h"
 #include "ui.h"
 #include "app.h"
+#include "esp_heap_caps.h"
+#include "esp_rom_sys.h"
 #include "weather.h"
 
 static const char *TAG = "main";
@@ -41,22 +43,14 @@ static void ui_task(void *arg)
 #if CONFIG_PM_ENABLE
         esp_pm_lock_acquire(cpu_lock);
 #endif
-        // Dimmed (left alone for 90 s, so nobody is watching closely): the loop still runs 30 times a
-        // second, so taps are read as quickly as ever, but the picture is drawn on every other pass,
-        // 15 frames a second. Drawing is most of the work, so this roughly halves it while dimmed.
-        // A touch draws at once, and undimming goes straight back to 60.
-        static unsigned pass;
-        bool draw = !app_dimmed() || display_touch_active() || (++pass & 1);
         ui_frame();
         // LVGL wakes its own refresh timer whenever something is invalidated, which made it draw
         // (and send) a half-updated frame inside lv_timer_handler and then draw again below. Only the
         // one lv_refr_now per loop should draw.
         lv_timer_pause(lv_display_get_refr_timer(disp));
         lv_timer_handler();
-        if (draw) {
-            ui_render_prep();
-            lv_refr_now(disp);
-        }
+        ui_render_prep();
+        lv_refr_now(disp);
 #if CONFIG_PM_ENABLE
         esp_pm_lock_release(cpu_lock);
 #endif
@@ -67,7 +61,9 @@ static void ui_task(void *arg)
         static uint32_t seen; static int64_t last_draw;
         uint32_t fc = display_flush_count();
         if (fc != seen || display_touch_active()) { seen = fc; last_draw = now; }
-        const int64_t period = app_dimmed() ? 33333 : now - last_draw > 400000 ? 50000 : 16667;
+        // Always 60 frames a second while anything moves, dimmed or not. While dimmed the screen is
+        // calm (see ui.c), so almost nothing moves and almost nothing is drawn anyway.
+        const int64_t period = now - last_draw > 400000 ? 50000 : 16667;
         next += period;
         if (next < now - period) next = now;                 // fell behind: don't try to catch up
         int64_t wait = next - now;
@@ -77,8 +73,18 @@ static void ui_task(void *arg)
     }
 }
 
+// Any memory request that can't be met is written to the log with its size and kind, so a
+// problem report always says what ran out.
+static void alloc_failed(size_t size, uint32_t caps, const char *fn)
+{
+    esp_rom_printf("W memory: couldn't get %u bytes (%s%s) in %s; internal free %u, largest %u\n", (unsigned)size,
+                   (caps & MALLOC_CAP_SPIRAM) ? "PSRAM" : "internal", (caps & MALLOC_CAP_DMA) ? ", DMA" : "", fn ? fn : "?",
+                   (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+}
+
 void app_main(void)
 {
+    heap_caps_register_failed_alloc_callback(alloc_failed);
     ESP_LOGI(TAG, "start");
     power_early_init();
 #if CONFIG_PM_ENABLE
